@@ -35,7 +35,7 @@ func (p *Protocol) handleCanUseToolRequest(ctx context.Context, requestID string
 
 	// No callback = deny (secure default)
 	if callback == nil {
-		return p.sendPermissionResponse(ctx, requestID, NewPermissionResultDeny("no permission callback registered"))
+		return p.sendPermissionResponse(ctx, requestID, NewPermissionResultDeny("no permission callback registered"), nil)
 	}
 
 	// Invoke callback synchronously with panic recovery (matches StderrCallback pattern)
@@ -54,18 +54,21 @@ func (p *Protocol) handleCanUseToolRequest(ctx context.Context, requestID string
 		return p.sendErrorResponse(ctx, requestID, fmt.Sprintf("callback error: %v", err))
 	}
 
-	return p.sendPermissionResponse(ctx, requestID, result)
+	return p.sendPermissionResponse(ctx, requestID, result, input)
 }
 
 // sendPermissionResponse sends a permission result back to CLI.
-func (p *Protocol) sendPermissionResponse(ctx context.Context, requestID string, result PermissionResult) error {
+func (p *Protocol) sendPermissionResponse(ctx context.Context, requestID string, result PermissionResult, originalInput map[string]any) error {
 	// Build response based on result type
 	var responseData map[string]any
 	switch r := result.(type) {
 	case PermissionResultAllow:
 		responseData = map[string]any{"behavior": "allow"}
+		// CLI requires updatedInput - use modified input if provided, else original
 		if r.UpdatedInput != nil {
 			responseData["updatedInput"] = r.UpdatedInput
+		} else {
+			responseData["updatedInput"] = originalInput
 		}
 		if len(r.UpdatedPermissions) > 0 {
 			responseData["updatedPermissions"] = r.UpdatedPermissions
