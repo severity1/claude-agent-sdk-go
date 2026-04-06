@@ -55,6 +55,16 @@ func (t *Transport) handleStdout() {
 				continue
 			}
 
+			// if this is a ResultMessage and we're not connected yet, it may be an initial connection message that we should ignore for stream validation
+			if resultMsg, ok := msg.(*shared.ResultMessage); ok && !t.connected && resultMsg.IsError {
+				// Route control messages to the controlProtocol for request/response correlation
+				if t.protocol != nil {
+					// HandleIncomingMessage routes control responses to pending requests
+					// and forwards non-control messages to the controlProtocol's message stream
+					t.protocol.HandleControlInitErr(fmt.Errorf("control protocol not yet initialized, %v", resultMsg.Errors))
+				}
+			}
+
 			// Check if this is a control message that should be routed to the protocol
 			if rawCtrl, ok := msg.(*shared.RawControlMessage); ok {
 				// Route control messages to the protocol for request/response correlation

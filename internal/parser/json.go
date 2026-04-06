@@ -268,6 +268,13 @@ func (p *Parser) parseSystemMessage(data map[string]any) (*shared.SystemMessage,
 func (p *Parser) parseResultMessage(data map[string]any) (*shared.ResultMessage, error) {
 	result := &shared.ResultMessage{}
 
+	bs, err := json.Marshal(data)
+	if err != nil {
+		return nil, shared.NewMessageParseError("result message missing data", data)
+	}
+	// common fields are optional and can be populated directly from the JSON without validation errors, following the Python SDK pattern
+	_ = json.Unmarshal(bs, result)
+
 	// Required fields with validation
 	if subtype, ok := data["subtype"].(string); ok {
 		result.Subtype = subtype
