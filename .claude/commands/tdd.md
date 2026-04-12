@@ -16,7 +16,8 @@ Verify the development environment is ready:
 3. **Pull latest changes** - Run `git pull` to sync with remote
 4. **Check for existing PRs** - Search for open PRs linked to issue #$ARGUMENTS to avoid duplicate work
 5. **Verify Go environment** - Run `go version` and ensure toolchain is available
-6. **Check for blocking dependencies** - Read issue body and look for "Depends on" or "Blocked by" sections
+6. **Sync Python SDK** - Run `git -C ../claude-agent-sdk-python pull origin main` to ensure local Python SDK reference is current
+7. **Check for blocking dependencies** - Read issue body and look for "Depends on" or "Blocked by" sections
 
 **STOP and report to user if any check fails** - Don't proceed until issues are resolved.
 
@@ -47,9 +48,10 @@ Understand existing patterns to match the project's conventions:
 
 1. **Review Python SDK Reference:**
    - **Fetch official documentation** using `curl -s https://platform.claude.com/docs/en/agent-sdk/python.md` - this is the authoritative Python SDK API reference
-   - Locate corresponding implementation in `../claude-code-sdk-python/` (local clone if available)
+   - Locate corresponding implementation in `../claude-agent-sdk-python/` (local clone)
    - Understand the behavior that needs 100% parity
    - Note any Go-specific adaptations needed
+   - **Check parity tracker** - Read `docs/tracking/README.md` to find if this issue maps to a tracked Python SDK PR. If a tracker entry exists, use the Python PR number as the authoritative reference and read the corresponding Python source changes for exact behavior to replicate.
 
 2. **Discover Existing Patterns:**
    - Search for similar implementations in the codebase
@@ -213,6 +215,7 @@ Verify:
 2. **Reference official docs** - `curl -s https://platform.claude.com/docs/en/agent-sdk/python.md` for API signatures and behavior
 3. **Verify 100% parity** on all implemented features
 4. **Document any intentional deviations** (Go-specific adaptations)
+5. **Update parity tracker** - If this issue corresponds to a tracked Python PR in `docs/tracking/README.md`, update the entry: set Go Status to `done` and fill in the Go PR number
 
 ### Test Authenticity Verification
 
