@@ -21,9 +21,9 @@ PRs merged after April 12, 2026 are NOT tracked here. Add them manually and upda
 |:---------|:------|:------------|
 | P0 | 8 | Message types/parsing - broken deserialization if missing |
 | P1 | 25 | New client methods, options, control protocol features |
-| P2 | 15 | Bug fixes - evaluate Go applicability |
-| Skip | 24 | CI/CD, Python typing, async-specific, PyPI/wheel, CLI bumps |
-| **Actionable** | **48** | |
+| P2 | 16 | Bug fixes - evaluate Go applicability |
+| Skip | 31 | CI/CD, Python typing, async-specific, PyPI/wheel, CLI bumps |
+| **Actionable** | **49** | |
 
 ## Priority Scale
 
@@ -69,6 +69,7 @@ Replay in order. Each row is one Python SDK PR, sorted by merge date.
 | 12 | #622 | list_sessions / get_session_messages | Mar 3 | feat | P1 | 3 | pending | - | Python added top-level list_sessions() and get_session_messages(session_id) using CLI flags --list-sessions and --get-session-messages. Returns []SDKSessionInfo and []SessionMessage. Add package-level functions, SDKSessionInfo struct (session_id, summary, last_modified, file_size, custom_title, first_prompt, git_branch, cwd), SessionMessage struct (type, uuid, session_id, message, parent_tool_use_id). Standalone CLI invocations, not control protocol. |
 | 13 | #628 | agent_id/agent_type in hook inputs | Mar 3 | feat | P1 | 2 | pending | - | Python added optional agent_id and agent_type to PreToolUseHookInput and PostToolUseHookInput via _SubagentContextMixin. Identifies which agent triggered tool use. Add `AgentID *string` and `AgentType *string` to both hook input structs in `internal/control/types_hook.go`. |
 | 14 | #630 | Fix string prompt closing stdin before MCP init | Mar 4 | fix | P2 | 7 | pending | - | Python fixed race: string prompt closed stdin before SDK MCP servers initialized. Check Go subprocess stdin in `internal/subprocess/` - verify stdin stays open until MCP init completes (wait for initialize response before closing write end). |
+| 14a | #642 | Wait for graceful subprocess shutdown before SIGTERM | Mar 19 | fix | P2 | 7 | pending | - | Python added a graceful wait period before sending SIGTERM, allowing the subprocess to finish in-flight work. Check Go process lifecycle in `internal/subprocess/process.go` - verify shutdown sequence gives process time to flush before SIGTERM. |
 | 15 | #648 | Typed RateLimitEvent message | Mar 12 | feat | P0 | 1 | pending | - | Python added dedicated RateLimitEvent message type (not SystemMessage) with RateLimitInfo: status, resets_at, rate_limit_type, utilization, overage_status, overage_resets_at, overage_disabled_reason, raw. Add RateLimitEvent struct implementing Message interface, RateLimitInfo struct, parser update to recognize type "rate_limit" in `internal/parser/parser.go`. Also carries uuid and session_id. |
 | 16 | #668 | rename_session | Mar 12 | feat | P1 | 3 | pending | - | Python added rename_session(session_id, new_name) to rename a session's custom title. Add RenameSession(ctx, sessionID, newName string) package-level function. Uses CLI flag or control request. |
 | 17 | #670 | tag_session with Unicode sanitization | Mar 12 | feat | P1 | 3 | pending | - | Python added tag_session(session_id, tag) with Unicode sanitization (strips non-printable chars, validates length). Add TagSession(ctx, sessionID, tag string) package-level function with equivalent Unicode validation. |
@@ -111,6 +112,8 @@ Not applicable to Go SDK. Listed for completeness so nothing falls through crack
 | Py PR | Title | Merged | Reason |
 |:------|:------|:-------|:-------|
 | #451 | Skip jobs requiring secrets from forks | Jan 5 | CI workflow |
+| #442 | Update Claude Agent SDK documentation link | Jan 8 | Docs-only |
+| #465 | Release v0.1.19 | Jan 8 | Python release |
 | #467 | Update claude-code actions to @v1 | Jan 12 | CI workflow |
 | #485 | Make permission callback e2e test robust | Jan 16 | Python e2e test |
 | #486 | Release v0.1.20 | Jan 16 | Python release |
@@ -124,9 +127,13 @@ Not applicable to Go SDK. Listed for completeness so nothing falls through crack
 | #538 | Enforce sequential tool execution in MCP e2e | Jan 30 | Python test |
 | #539 | Simplify release flow + RELEASING.md | Jan 30 | CI workflow |
 | #556 | Update Claude model to opus-4-6 in CI | Feb 7 | CI workflow |
+| #644 | Enable fine-grained tool streaming | Mar 6 | Reverted by #671 |
 | #661 | Publish macOS x86_64 wheel | Mar 9 | Python wheel |
 | #662 | Upload check wheels as artifacts | Mar 12 | Python wheel |
+| #649 | Clarify allowed_tools as permission allowlist | Mar 10 | Docs-only |
+| #671 | Revert fine-grained tool streaming (#644) | Mar 10 | Revert of #644 |
 | #700 | Harden PyPI publish | Mar 20 | PyPI infra |
+| #707 | Release v0.1.49 | Mar 20 | Python release |
 | #705 | Daily PyPI storage quota monitoring | Mar 20 | PyPI infra |
 | #708 | Retry install.sh fetch on 429 | Mar 24 | Build infra |
 | #722 | Defer CLI discovery to connect() | Mar 25 | Python async event loop specific |
