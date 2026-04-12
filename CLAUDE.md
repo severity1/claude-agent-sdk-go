@@ -117,7 +117,7 @@ make ci                           # Run full CI pipeline locally
 - Recent focus: CLI flag ordering fix - `BuildCommandWithPrompt()` places `--print <prompt>` after all option flags so flags like `--mcp-config` are parsed correctly (Issue #111)
 - Benchmark organization: Table-driven benchmarks across all core modules (options, parser, shared, control, cli)
 - Makefile integration: All code quality checks (fmt, vet, lint, cyclo) unified under `make check`
-- Python SDK parity tracking: `docs/tracking/README.md` tracks all Python SDK PRs to port; organized into 7 waves (type safety, hooks, sessions, agent/options, MCP, client methods, bug fixes); last ported feature was tool_use_result (Go PR #99)
+- Python SDK parity tracking: `docs/tracking/README.md` tracks all Python SDK PRs to port; organized into 4 chronological phases (Phase 1: Jan 26-Feb 20, Phase 2: Mar 3-Mar 16, Phase 3: Mar 20-Mar 30, Phase 4: Mar 31-Apr 8); 49 actionable PRs pending; last ported feature was tool_use_result (Go PR #99)
 
 <!-- END AUTO-MANAGED -->
 
