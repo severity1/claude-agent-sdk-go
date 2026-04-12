@@ -16,7 +16,7 @@ examples/
 ├── 02_client_streaming/     # Real-time streaming responses
 ├── 03_client_multi_turn/    # Multi-turn conversations
 ├── 04_query_with_tools/     # File operations with Query API
-├── 05_client_with_tools/    # Interactive file workflows
+├── 05_client_with_tools/    # Interactive file workflows; tool_use_result metadata, SetPermissionMode
 ├── 06_query_with_mcp/       # MCP server integration (Query)
 ├── 07_client_with_mcp/      # MCP server integration (Client)
 ├── 08_client_advanced/      # Error handling, model switching

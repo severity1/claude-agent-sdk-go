@@ -31,6 +31,11 @@ shared/
 - Concrete types: `UserMessage`, `AssistantMessage`, `SystemMessage`, `ResultMessage`
 - Content blocks: `TextBlock`, `ThinkingBlock`, `ToolUseBlock`, `ToolResultBlock`
 
+**UserMessage fields**:
+- `Content`: string or `[]ContentBlock`
+- `UUID`, `ParentToolUseID`: optional string pointers
+- `ToolUseResult map[string]any`: rich edit metadata (filePath, structuredPatch, diffs); use `HasToolUseResult()` / `GetToolUseResult()`
+
 <!-- END AUTO-MANAGED -->
 
 <!-- AUTO-MANAGED: conventions -->

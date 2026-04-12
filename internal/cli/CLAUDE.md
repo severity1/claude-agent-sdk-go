@@ -20,6 +20,7 @@ cli/
 **Key Functions**:
 - `FindCLI()`: Searches PATH and platform-specific locations for Claude CLI
 - `BuildCommand()`: Constructs CLI arguments from Options
+- `BuildCommandWithPrompt()`: Constructs CLI command for one-shot queries; prompt appended last after all flags so CLI parses flags (e.g. `--mcp-config`) correctly
 - `GetCLIVersion()`: Extracts and validates CLI version
 
 <!-- END AUTO-MANAGED -->

@@ -33,6 +33,7 @@ parser/
 - Buffer limit: 1MB max (`MaxBufferSize`) to prevent memory exhaustion
 - Speculative parsing: Match Python SDK behavior for streaming JSON
 - Type discrimination: Use `"type"` field to determine message type
+- `tool_use_result` extraction: `parseUserMessage` reads top-level `tool_use_result` map and passes it into `UserMessage.ToolUseResult`
 
 <!-- END AUTO-MANAGED -->
 

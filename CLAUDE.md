@@ -102,6 +102,7 @@ make ci                           # Run full CI pipeline locally
 - **Table-driven tests**: Use for complex scenarios with multiple test cases
 - **Functional options**: `WithXxx()` pattern for configuration
 - **Benchmark tests**: Use `var sink any` to prevent dead code elimination, always call `b.ReportAllocs()` and `b.ResetTimer()`
+- **tool_use_result metadata**: `UserMessage.ToolUseResult` carries rich edit info (filePath, structuredPatch, diffs); check with `HasToolUseResult()` before accessing via `GetToolUseResult()`
 
 <!-- END AUTO-MANAGED -->
 
@@ -111,7 +112,7 @@ make ci                           # Run full CI pipeline locally
 - Conventional commit messages: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`
 - Issue references in commits: `(Issue #N)` or `(#N)`, use `Closes #N` in PR body
 - PR-based workflow with CI checks
-- Recent focus: Comprehensive benchmarking for performance-critical modules (Issue #74, commits e1c48f3, 368fa3e)
+- Recent focus: CLI flag ordering fix - `BuildCommandWithPrompt()` places `--print <prompt>` after all option flags so flags like `--mcp-config` are parsed correctly (Issue #111)
 - Benchmark organization: Table-driven benchmarks across all core modules (options, parser, shared, control, cli)
 - Makefile integration: All code quality checks (fmt, vet, lint, cyclo) unified under `make check`
 
