@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -762,6 +763,7 @@ func testRouteControlResponse(t *testing.T) {
 	case resp := <-responseChan:
 		if resp == nil {
 			t.Fatal("expected response, got nil")
+			return
 		}
 		assertControlEqual(t, ResponseSubtypeSuccess, resp.Subtype)
 	case <-time.After(1 * time.Second):
@@ -1955,4 +1957,96 @@ func testMarshalRewindFilesRequest(t *testing.T) {
 	}
 	assertControlEqual(t, "rewind_files", request["subtype"])
 	assertControlEqual(t, "msg-uuid-12345", request["user_message_id"])
+}
+
+// =============================================================================
+// Phase 9: HandleControlInitErr Tests (Issue #110)
+// =============================================================================
+
+func TestHandleControlInitErr(t *testing.T) {
+	t.Run("unblocks_send_control_request", testInitErrUnblocksSendControlRequest)
+	t.Run("non_blocking_when_no_receiver", testInitErrNonBlockingNoReceiver)
+	t.Run("only_first_error_delivered", testInitErrOnlyFirstDelivered)
+}
+
+func testInitErrUnblocksSendControlRequest(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	// Inject an init error after a short delay (simulates early result message)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		protocol.HandleControlInitErr(fmt.Errorf("No conversation found with session ID: abc-123"))
+	}()
+
+	// SendControlRequest should unblock with the init error instead of timing out
+	_, err = protocol.SendControlRequest(ctx, InitializeRequest{
+		Subtype: SubtypeInitialize,
+	}, 2*time.Second)
+
+	if err == nil {
+		t.Fatal("expected error from SendControlRequest")
+	}
+	if !strings.Contains(err.Error(), "No conversation found") {
+		t.Errorf("expected session ID error, got: %v", err)
+	}
+}
+
+func testInitErrNonBlockingNoReceiver(t *testing.T) {
+	t.Helper()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	// HandleControlInitErr should not block even with no receiver
+	done := make(chan struct{})
+	go func() {
+		protocol.HandleControlInitErr(fmt.Errorf("test error"))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Non-blocking - good
+	case <-time.After(1 * time.Second):
+		t.Fatal("HandleControlInitErr blocked without a receiver")
+	}
+}
+
+func testInitErrOnlyFirstDelivered(t *testing.T) {
+	t.Helper()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	// Send two errors - only the first should be buffered (chan size 1)
+	protocol.HandleControlInitErr(fmt.Errorf("first error"))
+	protocol.HandleControlInitErr(fmt.Errorf("second error"))
+
+	// Drain the channel - should get only the first
+	select {
+	case err := <-protocol.initErrChan:
+		if !strings.Contains(err.Error(), "first error") {
+			t.Errorf("expected first error, got: %v", err)
+		}
+	default:
+		t.Fatal("expected an error in initErrChan")
+	}
+
+	// Channel should be empty now
+	select {
+	case err := <-protocol.initErrChan:
+		t.Errorf("expected empty channel, got: %v", err)
+	default:
+		// Good - empty
+	}
 }

@@ -177,6 +177,7 @@ type ResultMessage struct {
 	DurationMs       int             `json:"duration_ms"`
 	DurationAPIMs    int             `json:"duration_api_ms"`
 	IsError          bool            `json:"is_error"`
+	Errors           []string        `json:"errors,omitempty"`
 	NumTurns         int             `json:"num_turns"`
 	SessionID        string          `json:"session_id"`
 	TotalCostUSD     *float64        `json:"total_cost_usd,omitempty"`

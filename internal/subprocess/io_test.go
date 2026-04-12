@@ -11,6 +11,77 @@ import (
 	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
 
+// TestFormatInitError tests the error message formatting for early init failures (Issue #110)
+func TestFormatInitError(t *testing.T) {
+	tests := []struct {
+		name     string
+		msg      *shared.ResultMessage
+		expected string
+	}{
+		{
+			name: "uses_errors_field",
+			msg: &shared.ResultMessage{
+				IsError: true,
+				Errors:  []string{"No conversation found with session ID: abc-123"},
+				Subtype: "error",
+			},
+			expected: "No conversation found with session ID: abc-123",
+		},
+		{
+			name: "joins_multiple_errors",
+			msg: &shared.ResultMessage{
+				IsError: true,
+				Errors:  []string{"error one", "error two"},
+				Subtype: "error",
+			},
+			expected: "error one; error two",
+		},
+		{
+			name: "falls_back_to_result",
+			msg: &shared.ResultMessage{
+				IsError: true,
+				Errors:  nil,
+				Result:  strPtr("something went wrong"),
+				Subtype: "error",
+			},
+			expected: "something went wrong",
+		},
+		{
+			name: "falls_back_to_subtype",
+			msg: &shared.ResultMessage{
+				IsError: true,
+				Errors:  nil,
+				Result:  nil,
+				Subtype: "fatal",
+			},
+			expected: "initialization failed with subtype: fatal",
+		},
+		{
+			name: "empty_errors_falls_back_to_result",
+			msg: &shared.ResultMessage{
+				IsError: true,
+				Errors:  []string{},
+				Result:  strPtr("fallback message"),
+				Subtype: "error",
+			},
+			expected: "fallback message",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatInitError(tc.msg)
+			if got != tc.expected {
+				t.Errorf("expected %q, got %q", tc.expected, got)
+			}
+		})
+	}
+}
+
+func strPtr(s string) *string {
+	return &s
+}
+
 // TestTransportHandleStdoutErrorPaths tests uncovered handleStdout scenarios
 func TestTransportHandleStdoutErrorPaths(t *testing.T) {
 	ctx, cancel := setupTransportTestContext(t, 5*time.Second)

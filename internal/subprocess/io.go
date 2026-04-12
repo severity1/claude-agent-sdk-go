@@ -55,6 +55,11 @@ func (t *Transport) handleStdout() {
 				continue
 			}
 
+			// If this is an error ResultMessage before we're fully connected,
+			// it means the CLI failed during init (e.g., invalid session ID).
+			// Route the error to the control protocol to unblock Initialize().
+			t.routeInitError(msg)
+
 			// Check if this is a control message that should be routed to the protocol
 			if rawCtrl, ok := msg.(*shared.RawControlMessage); ok {
 				// Route control messages to the protocol for request/response correlation
@@ -119,6 +124,29 @@ func (t *Transport) handleStderrCallback() {
 		}()
 	}
 	// Silently ignore scanner errors (matches Python SDK's except Exception: pass)
+}
+
+// routeInitError checks if a message is an error ResultMessage arriving before
+// the transport is fully connected, and routes it to the control protocol to
+// unblock Initialize().
+func (t *Transport) routeInitError(msg shared.Message) {
+	resultMsg, ok := msg.(*shared.ResultMessage)
+	if !ok || t.connected || !resultMsg.IsError || t.protocol == nil {
+		return
+	}
+	t.protocol.HandleControlInitErr(fmt.Errorf("%s", formatInitError(resultMsg)))
+}
+
+// formatInitError builds a meaningful error string from a ResultMessage that
+// arrived during initialization. Prefers Errors, falls back to Result, then Subtype.
+func formatInitError(msg *shared.ResultMessage) string {
+	if len(msg.Errors) > 0 {
+		return strings.Join(msg.Errors, "; ")
+	}
+	if msg.Result != nil && *msg.Result != "" {
+		return *msg.Result
+	}
+	return fmt.Sprintf("initialization failed with subtype: %s", msg.Subtype)
 }
 
 // setupStderr configures stderr handling based on options.

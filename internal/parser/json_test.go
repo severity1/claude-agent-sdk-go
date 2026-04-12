@@ -1190,6 +1190,7 @@ func assertBufferOverflowError(t *testing.T, err error) {
 	jsonDecodeErr := shared.AsJSONDecodeError(err)
 	if jsonDecodeErr == nil {
 		t.Fatalf("Expected JSONDecodeError, got %T", err)
+		return
 	}
 	if !strings.Contains(jsonDecodeErr.Error(), "buffer overflow") {
 		t.Errorf("Expected buffer overflow error, got %q", jsonDecodeErr.Error())
@@ -1765,4 +1766,89 @@ func TestStreamEventErrorConditions(t *testing.T) {
 			assertParseError(t, err, test.expectError)
 		})
 	}
+}
+
+// TestResultMessageErrorsField tests the errors array field on ResultMessage (Issue #110)
+func TestResultMessageErrorsField(t *testing.T) {
+	parser := setupParserTest(t)
+
+	baseData := map[string]any{
+		"type":            "result",
+		"subtype":         "error",
+		"duration_ms":     0.0,
+		"duration_api_ms": 0.0,
+		"is_error":        true,
+		"num_turns":       0.0,
+		"session_id":      "s123",
+	}
+
+	t.Run("with_errors_array", func(t *testing.T) {
+		data := make(map[string]any)
+		for k, v := range baseData {
+			data[k] = v
+		}
+		data["errors"] = []any{
+			"No conversation found with session ID: abc-123",
+			"second error",
+		}
+
+		msg, err := parser.ParseMessage(data)
+		assertNoParseError(t, err)
+
+		resultMsg := msg.(*shared.ResultMessage)
+		if len(resultMsg.Errors) != 2 {
+			t.Fatalf("expected 2 errors, got %d", len(resultMsg.Errors))
+		}
+		if resultMsg.Errors[0] != "No conversation found with session ID: abc-123" {
+			t.Errorf("unexpected first error: %s", resultMsg.Errors[0])
+		}
+		if resultMsg.Errors[1] != "second error" {
+			t.Errorf("unexpected second error: %s", resultMsg.Errors[1])
+		}
+	})
+
+	t.Run("without_errors_array", func(t *testing.T) {
+		msg, err := parser.ParseMessage(baseData)
+		assertNoParseError(t, err)
+
+		resultMsg := msg.(*shared.ResultMessage)
+		if len(resultMsg.Errors) != 0 {
+			t.Errorf("expected empty errors, got %v", resultMsg.Errors)
+		}
+	})
+
+	t.Run("with_empty_errors_array", func(t *testing.T) {
+		data := make(map[string]any)
+		for k, v := range baseData {
+			data[k] = v
+		}
+		data["errors"] = []any{}
+
+		msg, err := parser.ParseMessage(data)
+		assertNoParseError(t, err)
+
+		resultMsg := msg.(*shared.ResultMessage)
+		if len(resultMsg.Errors) != 0 {
+			t.Errorf("expected empty errors, got %v", resultMsg.Errors)
+		}
+	})
+
+	t.Run("with_non_string_errors_ignored", func(t *testing.T) {
+		data := make(map[string]any)
+		for k, v := range baseData {
+			data[k] = v
+		}
+		data["errors"] = []any{"valid error", 123, true}
+
+		msg, err := parser.ParseMessage(data)
+		assertNoParseError(t, err)
+
+		resultMsg := msg.(*shared.ResultMessage)
+		if len(resultMsg.Errors) != 1 {
+			t.Fatalf("expected 1 error (non-strings skipped), got %d", len(resultMsg.Errors))
+		}
+		if resultMsg.Errors[0] != "valid error" {
+			t.Errorf("unexpected error: %s", resultMsg.Errors[0])
+		}
+	})
 }

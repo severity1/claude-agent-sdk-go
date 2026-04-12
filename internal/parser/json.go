@@ -325,6 +325,15 @@ func (p *Parser) parseResultMessage(data map[string]any) (*shared.ResultMessage,
 		result.StructuredOutput = structuredOutput
 	}
 
+	// Parse errors array
+	if errorsRaw, ok := data["errors"].([]any); ok {
+		for _, e := range errorsRaw {
+			if s, ok := e.(string); ok {
+				result.Errors = append(result.Errors, s)
+			}
+		}
+	}
+
 	return result, nil
 }
 

@@ -39,6 +39,7 @@ type Protocol struct {
 	// State
 	initialized  bool
 	initResponse *InitializeResponse
+	initErrChan  chan error
 	closed       bool
 	started      bool
 
@@ -112,6 +113,7 @@ func NewProtocol(transport Transport, opts ...ProtocolOption) *Protocol {
 		pendingRequests: make(map[string]chan *Response),
 		messageStream:   make(chan map[string]any, 100),
 		initTimeout:     DefaultInitTimeout,
+		initErrChan:     make(chan error, 1),
 	}
 
 	for _, opt := range opts {
@@ -237,8 +239,21 @@ func (p *Protocol) SendControlRequest(ctx context.Context, request any, timeout 
 		}
 		return response.Response, nil
 
+	case err := <-p.initErrChan:
+		return nil, err
+
 	case <-timeoutCtx.Done():
 		return nil, fmt.Errorf("control request timeout: %w", timeoutCtx.Err())
+	}
+}
+
+// HandleControlInitErr reports an initialization error back to any pending
+// SendControlRequest, unblocking it when the CLI returns an error result
+// instead of a control protocol response (e.g., invalid session ID).
+func (p *Protocol) HandleControlInitErr(err error) {
+	select {
+	case p.initErrChan <- err:
+	default:
 	}
 }
 
