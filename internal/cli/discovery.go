@@ -133,12 +133,15 @@ func BuildCommandWithPrompt(cliPath string, options *shared.Options, prompt stri
 	cmd := []string{cliPath}
 
 	// Base arguments - always include these
-	cmd = append(cmd, "--output-format", "stream-json", "--verbose", "--print", prompt)
+	cmd = append(cmd, "--output-format", "stream-json", "--verbose")
 
-	// Add all configuration options as CLI flags
+	// Add all configuration options as CLI flags before the prompt
 	if options != nil {
 		cmd = addOptionsToCommand(cmd, options)
 	}
+
+	// Prompt must be last so the CLI parses all flags (e.g. --mcp-config) correctly
+	cmd = append(cmd, "--print", prompt)
 
 	return cmd
 }

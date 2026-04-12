@@ -190,6 +190,15 @@ func TestBuildCommandWithPrompt(t *testing.T) {
 		{"basic_prompt", &shared.Options{}, "What is 2+2?", validateBasicPromptCommand},
 		{"empty_prompt", nil, "", validateEmptyPromptCommand},
 		{"multiline_prompt", &shared.Options{Model: stringPtr("claude-3-sonnet")}, "Line 1\nLine 2", validateBasicPromptCommand},
+		{
+			"prompt_after_options",
+			&shared.Options{
+				ExtraArgs: map[string]*string{"mcp-config": stringPtr("/tmp/mcp.json")},
+				Model:     stringPtr("claude-3-sonnet"),
+			},
+			"Use get_server_time tool",
+			validatePromptAfterOptions,
+		},
 	}
 
 	for _, test := range tests {
@@ -482,6 +491,35 @@ func validateEmptyPromptCommand(t *testing.T, cmd []string, _ string) {
 	assertContainsArgs(t, cmd, "--output-format", "stream-json")
 	assertContainsArg(t, cmd, "--verbose")
 	assertContainsArgs(t, cmd, "--print", "") // Empty prompt should still be there
+}
+
+func validatePromptAfterOptions(t *testing.T, cmd []string, prompt string) {
+	t.Helper()
+	assertContainsArgs(t, cmd, "--print", prompt)
+	assertContainsArgs(t, cmd, "--mcp-config", "/tmp/mcp.json")
+	assertContainsArgs(t, cmd, "--model", "claude-3-sonnet")
+
+	// --print must come AFTER all option flags so the CLI parses them correctly
+	printIdx := -1
+	mcpIdx := -1
+	modelIdx := -1
+	for i, arg := range cmd {
+		switch arg {
+		case "--print":
+			printIdx = i
+		case "--mcp-config":
+			mcpIdx = i
+		case "--model":
+			modelIdx = i
+		}
+	}
+
+	if mcpIdx > printIdx {
+		t.Errorf("--mcp-config (index %d) must appear before --print (index %d), got %v", mcpIdx, printIdx, cmd)
+	}
+	if modelIdx > printIdx {
+		t.Errorf("--model (index %d) must appear before --print (index %d), got %v", modelIdx, printIdx, cmd)
+	}
 }
 
 // Helper function for string pointers
