@@ -188,6 +188,7 @@ func TestAsErrorHelpersFieldAccess(t *testing.T) {
 		result := AsCLINotFoundError(err)
 		if result == nil {
 			t.Fatal("AsCLINotFoundError returned nil")
+			return
 		}
 		if result.Path != testCLIPath {
 			t.Errorf("Path field: got %q, want %q", result.Path, testCLIPath)
@@ -200,6 +201,7 @@ func TestAsErrorHelpersFieldAccess(t *testing.T) {
 		result := AsProcessError(err)
 		if result == nil {
 			t.Fatal("AsProcessError returned nil")
+			return
 		}
 		if result.ExitCode != exitCode {
 			t.Errorf("ExitCode field: got %d, want %d", result.ExitCode, exitCode)
@@ -217,6 +219,7 @@ func TestAsErrorHelpersFieldAccess(t *testing.T) {
 		result := AsJSONDecodeError(err)
 		if result == nil {
 			t.Fatal("AsJSONDecodeError returned nil")
+			return
 		}
 		if result.Line != line {
 			t.Errorf("Line field: got %q, want %q", result.Line, line)
@@ -235,6 +238,7 @@ func TestAsErrorHelpersFieldAccess(t *testing.T) {
 		result := AsMessageParseError(err)
 		if result == nil {
 			t.Fatal("AsMessageParseError returned nil")
+			return
 		}
 		dataMap, ok := result.Data.(map[string]any)
 		if !ok {
@@ -255,6 +259,7 @@ func TestAsErrorHelpersFieldAccess(t *testing.T) {
 		result := AsCLINotFoundError(doubleWrapped)
 		if result == nil {
 			t.Fatal("AsCLINotFoundError returned nil for double-wrapped error")
+			return
 		}
 		if result.Path != path {
 			t.Errorf("Path field through double wrapping: got %q, want %q", result.Path, path)

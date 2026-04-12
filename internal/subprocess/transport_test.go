@@ -499,6 +499,7 @@ func TestNewWithPrompt(t *testing.T) {
 
 			if transport == nil {
 				t.Fatal("Expected transport to be created, got nil")
+				return
 			}
 
 			// Verify key configuration
