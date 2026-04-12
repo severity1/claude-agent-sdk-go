@@ -40,6 +40,7 @@ subprocess/
 - Message routing: Distinguish control vs regular messages by type
 - Protocol adapter: Bridges subprocess stdin to `control.Transport` interface
 - Resource cleanup: Always close stdin before waiting for process exit
+- Init error routing: `routeInitError()` in io.go detects error `ResultMessage` before `t.connected` is set and calls `protocol.HandleControlInitErr()`; `formatInitError()` builds error string with priority: `Errors` slice > `Result` field > `Subtype` fallback
 
 <!-- END AUTO-MANAGED -->
 
