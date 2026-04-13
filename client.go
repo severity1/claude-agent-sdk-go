@@ -18,6 +18,8 @@ type Client interface {
 	Disconnect() error
 	Query(ctx context.Context, prompt string) error
 	QueryWithSession(ctx context.Context, prompt string, sessionID string) error
+	QueryAsync(ctx context.Context, prompt string) (QueryHandle, error)
+	QueryWithSessionAsync(ctx context.Context, prompt string, sessionID string) (QueryHandle, error)
 	QueryStream(ctx context.Context, messages <-chan StreamMessage) error
 	ReceiveMessages(ctx context.Context) <-chan Message
 	ReceiveResponse(ctx context.Context) MessageIterator
@@ -50,13 +52,18 @@ type ClientImpl struct {
 	connected       bool
 	msgChan         <-chan Message
 	errChan         <-chan error
+
+	// Active query tracking for async operations
+	activeQueries map[string]*queryHandle
+	queriesMu     sync.RWMutex
 }
 
 // NewClient creates a new Client with the given options.
 func NewClient(opts ...Option) Client {
 	options := NewOptions(opts...)
 	client := &ClientImpl{
-		options: options,
+		options:       options,
+		activeQueries: make(map[string]*queryHandle),
 	}
 	return client
 }
@@ -67,6 +74,7 @@ func NewClientWithTransport(transport Transport, opts ...Option) Client {
 	return &ClientImpl{
 		customTransport: transport,
 		options:         options,
+		activeQueries:   make(map[string]*queryHandle),
 	}
 }
 
@@ -270,6 +278,14 @@ func (c *ClientImpl) Connect(ctx context.Context, _ ...StreamMessage) error {
 func (c *ClientImpl) Disconnect() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	// Cancel all active queries before disconnecting
+	c.queriesMu.Lock()
+	for _, handle := range c.activeQueries {
+		handle.Cancel()
+	}
+	c.activeQueries = make(map[string]*queryHandle)
+	c.queriesMu.Unlock()
 
 	if c.transport != nil && c.connected {
 		if err := c.transport.Close(); err != nil {
