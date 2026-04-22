@@ -77,7 +77,7 @@ func New(cliPath string, options *shared.Options, closeStdin bool, entrypoint st
 		options:    options,
 		closeStdin: closeStdin,
 		entrypoint: entrypoint,
-		parser:     parser.New(),
+		parser:     newParser(options),
 		validator:  shared.NewStreamValidator(),
 	}
 }
@@ -89,10 +89,18 @@ func NewWithPrompt(cliPath string, options *shared.Options, prompt string) *Tran
 		options:    options,
 		closeStdin: true,
 		entrypoint: "sdk-go", // Query mode uses sdk-go
-		parser:     parser.New(),
+		parser:     newParser(options),
 		validator:  shared.NewStreamValidator(),
 		promptArg:  &prompt,
 	}
+}
+
+// newParser creates a parser using the buffer size from options, or the default.
+func newParser(options *shared.Options) *parser.Parser {
+	if options != nil && options.MaxBufferSize != nil {
+		return parser.NewWithSize(*options.MaxBufferSize)
+	}
+	return parser.New()
 }
 
 // IsConnected returns whether the transport is currently connected.

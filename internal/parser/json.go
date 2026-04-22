@@ -30,6 +30,13 @@ func New() *Parser {
 	}
 }
 
+// NewWithSize creates a new JSON parser with a custom maximum buffer size.
+func NewWithSize(maxBufferSize int) *Parser {
+	return &Parser{
+		maxBufferSize: maxBufferSize,
+	}
+}
+
 // ProcessLine processes a line of JSON input with speculative parsing.
 // Handles multiple JSON objects on single line and embedded newlines.
 func (p *Parser) ProcessLine(line string) ([]shared.Message, error) {

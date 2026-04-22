@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/severity1/claude-agent-sdk-go/internal/parser"
 	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
 
@@ -18,13 +19,14 @@ func (t *Transport) handleStdout() {
 
 	scanner := bufio.NewScanner(t.stdout)
 
-	// Increase scanner buffer to handle large tool results (files, etc.)
-	// Default bufio.Scanner has MaxScanTokenSize of 64KB which is insufficient
-	// for tool results containing large files. We use 1MB to match parser's
-	// MaxBufferSize and handle files up to ~900KB after JSON encoding overhead.
-	const maxScanTokenSize = 1024 * 1024 // 1MB
-	buf := make([]byte, maxScanTokenSize)
-	scanner.Buffer(buf, maxScanTokenSize)
+	// Scanner token size must match the parser's buffer limit so lines aren't
+	// truncated before parsing. Default is 64KB; respect MaxBufferSize if set.
+	scanTokenSize := parser.MaxBufferSize
+	if t.options != nil && t.options.MaxBufferSize != nil {
+		scanTokenSize = *t.options.MaxBufferSize
+	}
+	buf := make([]byte, scanTokenSize)
+	scanner.Buffer(buf, scanTokenSize)
 
 	for scanner.Scan() {
 		select {
