@@ -100,12 +100,14 @@ make ci                           # Run full CI pipeline locally
 
 - **Transport interface**: Central abstraction for CLI communication; use `MockTransport` for tests
 - **Process cleanup**: SIGTERM -> wait 5 seconds -> SIGKILL pattern
-- **Buffer protection**: 1MB limit to prevent memory exhaustion
+- **Buffer protection**: 1MB limit to prevent memory exhaustion; `parser.NewWithSize(n)` allows configurable override
 - **Environment variables**: Set `CLAUDE_CODE_ENTRYPOINT` to identify SDK to CLI
 - **Table-driven tests**: Use for complex scenarios with multiple test cases
 - **Functional options**: `WithXxx()` pattern for configuration
 - **Benchmark tests**: Use `var sink any` to prevent dead code elimination, always call `b.ReportAllocs()` and `b.ResetTimer()`
 - **tool_use_result metadata**: `UserMessage.ToolUseResult` carries rich edit info (filePath, structuredPatch, diffs); check with `HasToolUseResult()` before accessing via `GetToolUseResult()`
+- **parent_tool_use_id placement**: parsed from top-level JSON data (not nested `message` object) for `UserMessage`, `AssistantMessage`, and `StreamEvent`; identifies messages produced inside a subagent (Agent/Task tool)
+- **AssistantMessage error field**: `AssistantMessage.Error` is `*AssistantMessageError` parsed from `messageData["error"]`; use `HasError()` to check presence, `IsRateLimited()` for rate limit specifically
 - **Init error routing**: `subprocess.routeInitError()` detects error `ResultMessage` arriving before transport is connected and calls `protocol.HandleControlInitErr()` to unblock `SendControlRequest()` via `initErrChan`
 - **Control protocol delegation**: `SetModel()`, `SetPermissionMode()`, `RewindFiles()`, `GetMcpStatus()` all guard with `t.connected && !t.closeStdin` before delegating to `t.protocol`
 - **MCP config serialization**: `generateMcpConfigFile()` strips Go `Instance` field from SDK servers and propagates `AlwaysLoad` explicitly (not via struct json tags) when building CLI config
