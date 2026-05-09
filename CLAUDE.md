@@ -116,6 +116,9 @@ make ci                           # Run full CI pipeline locally
 - **Constructor functions**: `NewGetMcpStatusRequest()` follows `NewPermissionResultAllow/Deny` pattern - constructor sets required `Subtype` field; use constructors for control request types with fixed subtype values
 - **McpServerConfigType constants**: `McpServerConfigTypeStdio/SSE/HTTP/SDK/ClaudeAI` re-exported in root `types.go` alongside `McpServerConnectionStatus` constants; discriminate `McpServerStatusConfig.Type` field
 - **McpServerStatus conditional fields**: `ServerInfo` non-nil only when `Status == McpServerConnectionStatusConnected`; `Error` non-nil only when `Status == McpServerConnectionStatusFailed`; `Tools` populated only when connected
+- **streamErrChan fan-in**: `ClientImpl.streamErrChan chan error` (buffered, size 1) receives errors from `QueryStream` goroutine; `ReceiveResponse()` fans in transport `errChan` and `streamErrChan` into a merged error channel so callers see all stream errors
+- **prepareOptions()**: applies defaults before validating - auto-configures `PermissionPromptToolName = "stdio"` when `CanUseTool` callback is set; renamed from `validateOptions()` to reflect dual role
+- **ReceiveResponse() disconnected behavior**: returns non-nil `clientIterator` with closed `msgChan` and empty `errChan` (never nil) when called while disconnected; callers can always range over the result safely
 
 <!-- END AUTO-MANAGED -->
 
@@ -125,7 +128,7 @@ make ci                           # Run full CI pipeline locally
 - Conventional commit messages: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`
 - Issue references in commits: `(Issue #N)` or `(#N)`, use `Closes #N` in PR body
 - PR-based workflow with CI checks
-- Recent focus: GetMcpStatus() control protocol method (Python PR #516); AlwaysLoad propagation for MCP server configs (Issue #119); init error handling in control protocol (Issue #110)
+- Recent focus: AssistantMessage error object form (Python PR #506, feature/phase1-1); GetMcpStatus() control protocol method (Python PR #516, Go PR #124); AlwaysLoad propagation for MCP server configs (Issue #119); init error handling in control protocol (Issue #110)
 - Benchmark organization: Table-driven benchmarks across all core modules (options, parser, shared, control, cli)
 - Makefile integration: All code quality checks (fmt, vet, lint, cyclo) unified under `make check`
 - Python SDK parity tracking: `docs/tracking/README.md` tracks all Python SDK PRs to port; organized into 4 chronological phases (Phase 1: Jan 26-Feb 20, Phase 2: Mar 3-Mar 16, Phase 3: Mar 20-Mar 30, Phase 4: Mar 31-Apr 8); last ported features: GetMcpStatus (Go PR #124, Python PR #516), AlwaysLoad MCP config (Go PR #120, Issue #119)
