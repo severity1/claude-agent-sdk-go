@@ -109,10 +109,13 @@ make ci                           # Run full CI pipeline locally
 - **parent_tool_use_id placement**: parsed from top-level JSON data (not nested `message` object) for `UserMessage`, `AssistantMessage`, and `StreamEvent`; identifies messages produced inside a subagent (Agent/Task tool)
 - **AssistantMessage error field**: `AssistantMessage.Error` is `*AssistantMessageError` parsed from `messageData["error"]`; use `HasError()` to check presence, `IsRateLimited()` for rate limit specifically
 - **Init error routing**: `subprocess.routeInitError()` detects error `ResultMessage` arriving before transport is connected and calls `protocol.HandleControlInitErr()` to unblock `SendControlRequest()` via `initErrChan`
-- **Control protocol delegation**: `SetModel()`, `SetPermissionMode()`, `RewindFiles()`, `GetMcpStatus()` all guard with `t.connected && !t.closeStdin` before delegating to `t.protocol`
+- **Control protocol delegation**: `SetModel()`, `SetPermissionMode()`, `RewindFiles()`, `GetMcpStatus()` all guard with `t.connected && !t.closeStdin` before delegating to `t.protocol`; nil protocol guard uses descriptive error `"internal error: transport connected but control protocol is nil"`
 - **MCP config serialization**: `generateMcpConfigFile()` strips Go `Instance` field from SDK servers and propagates `AlwaysLoad` explicitly (not via struct json tags) when building CLI config
 - **Permission suggestions**: `ToolPermissionContext.Suggestions []PermissionUpdate` carries CLI-provided permission suggestions to `CanUseTool` callbacks; `PermissionUpdate.Type` is one of `addRules`, `replaceRules`, `removeRules`, `setMode`, `addDirectories`, `removeDirectories`
 - **Test mock helpers**: `newClientMockTransport()` / `newQueryMockTransport()` with functional options (`WithQueryAssistantResponse`, `WithQueryMultipleMessages`); `QueryWithTransport()` for transport-injected query tests
+- **Constructor functions**: `NewGetMcpStatusRequest()` follows `NewPermissionResultAllow/Deny` pattern - constructor sets required `Subtype` field; use constructors for control request types with fixed subtype values
+- **McpServerConfigType constants**: `McpServerConfigTypeStdio/SSE/HTTP/SDK/ClaudeAI` re-exported in root `types.go` alongside `McpServerConnectionStatus` constants; discriminate `McpServerStatusConfig.Type` field
+- **McpServerStatus conditional fields**: `ServerInfo` non-nil only when `Status == McpServerConnectionStatusConnected`; `Error` non-nil only when `Status == McpServerConnectionStatusFailed`; `Tools` populated only when connected
 
 <!-- END AUTO-MANAGED -->
 
@@ -125,7 +128,7 @@ make ci                           # Run full CI pipeline locally
 - Recent focus: GetMcpStatus() control protocol method (Python PR #516); AlwaysLoad propagation for MCP server configs (Issue #119); init error handling in control protocol (Issue #110)
 - Benchmark organization: Table-driven benchmarks across all core modules (options, parser, shared, control, cli)
 - Makefile integration: All code quality checks (fmt, vet, lint, cyclo) unified under `make check`
-- Python SDK parity tracking: `docs/tracking/README.md` tracks all Python SDK PRs to port; organized into 4 chronological phases (Phase 1: Jan 26-Feb 20, Phase 2: Mar 3-Mar 16, Phase 3: Mar 20-Mar 30, Phase 4: Mar 31-Apr 8); last ported features: GetMcpStatus (Go PR #121, Python PR #516), AlwaysLoad MCP config (Go PR #120, Issue #119)
+- Python SDK parity tracking: `docs/tracking/README.md` tracks all Python SDK PRs to port; organized into 4 chronological phases (Phase 1: Jan 26-Feb 20, Phase 2: Mar 3-Mar 16, Phase 3: Mar 20-Mar 30, Phase 4: Mar 31-Apr 8); last ported features: GetMcpStatus (Go PR #124, Python PR #516), AlwaysLoad MCP config (Go PR #120, Issue #119)
 
 <!-- END AUTO-MANAGED -->
 

@@ -41,6 +41,7 @@ subprocess/
 - Protocol adapter: Bridges subprocess stdin to `control.Transport` interface
 - Resource cleanup: Always close stdin before waiting for process exit
 - Init error routing: `routeInitError()` in io.go detects error `ResultMessage` before `t.connected` is set and calls `protocol.HandleControlInitErr()`; `formatInitError()` builds error string with priority: `Errors` slice > `Result` field > `Subtype` fallback
+- Nil protocol guard: `GetMcpStatus()` (and other control delegation methods) return descriptive error `"internal error: transport connected but control protocol is nil"` when `t.protocol == nil` after connected check
 
 <!-- END AUTO-MANAGED -->
 
