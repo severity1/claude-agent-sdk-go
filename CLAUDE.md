@@ -53,10 +53,11 @@ make ci                           # Run full CI pipeline locally
 
 ```
 .
-├── client.go              # Client interface and WithClient context manager
+├── client.go              # Client interface and WithClient/WithClientTransport context managers
 ├── query.go               # Query API (one-shot operations)
 ├── errors.go              # Structured error types
 ├── transport.go           # Transport interface abstraction
+├── types.go               # Re-exports of all internal types and constants for external consumers
 ├── options.go             # Options types and functional options
 ├── options_bench_test.go  # Options performance benchmarks
 ├── internal/
@@ -106,6 +107,10 @@ make ci                           # Run full CI pipeline locally
 - **Benchmark tests**: Use `var sink any` to prevent dead code elimination, always call `b.ReportAllocs()` and `b.ResetTimer()`
 - **tool_use_result metadata**: `UserMessage.ToolUseResult` carries rich edit info (filePath, structuredPatch, diffs); check with `HasToolUseResult()` before accessing via `GetToolUseResult()`
 - **Init error routing**: `subprocess.routeInitError()` detects error `ResultMessage` arriving before transport is connected and calls `protocol.HandleControlInitErr()` to unblock `SendControlRequest()` via `initErrChan`
+- **Control protocol delegation**: `SetModel()`, `SetPermissionMode()`, `RewindFiles()`, `GetMcpStatus()` all guard with `t.connected && !t.closeStdin` before delegating to `t.protocol`
+- **MCP config serialization**: `generateMcpConfigFile()` strips Go `Instance` field from SDK servers and propagates `AlwaysLoad` explicitly (not via struct json tags) when building CLI config
+- **Permission suggestions**: `ToolPermissionContext.Suggestions []PermissionUpdate` carries CLI-provided permission suggestions to `CanUseTool` callbacks; `PermissionUpdate.Type` is one of `addRules`, `replaceRules`, `removeRules`, `setMode`, `addDirectories`, `removeDirectories`
+- **Test mock helpers**: `newClientMockTransport()` / `newQueryMockTransport()` with functional options (`WithQueryAssistantResponse`, `WithQueryMultipleMessages`); `QueryWithTransport()` for transport-injected query tests
 
 <!-- END AUTO-MANAGED -->
 
@@ -115,10 +120,10 @@ make ci                           # Run full CI pipeline locally
 - Conventional commit messages: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`
 - Issue references in commits: `(Issue #N)` or `(#N)`, use `Closes #N` in PR body
 - PR-based workflow with CI checks
-- Recent focus: staticcheck SA5011 fix - add `return` after `t.Fatal()` in subtests to prevent nil pointer dereference warnings; CLI flag ordering fix - `BuildCommandWithPrompt()` places `--print <prompt>` after all option flags (Issue #111)
+- Recent focus: GetMcpStatus() control protocol method (Python PR #516); AlwaysLoad propagation for MCP server configs (Issue #119); init error handling in control protocol (Issue #110)
 - Benchmark organization: Table-driven benchmarks across all core modules (options, parser, shared, control, cli)
 - Makefile integration: All code quality checks (fmt, vet, lint, cyclo) unified under `make check`
-- Python SDK parity tracking: `docs/tracking/README.md` tracks all Python SDK PRs to port; organized into 4 chronological phases (Phase 1: Jan 26-Feb 20, Phase 2: Mar 3-Mar 16, Phase 3: Mar 20-Mar 30, Phase 4: Mar 31-Apr 8); last ported features: tool_use_result (Go PR #99), errors field on ResultMessage (Go PR #114, Python PR #749)
+- Python SDK parity tracking: `docs/tracking/README.md` tracks all Python SDK PRs to port; organized into 4 chronological phases (Phase 1: Jan 26-Feb 20, Phase 2: Mar 3-Mar 16, Phase 3: Mar 20-Mar 30, Phase 4: Mar 31-Apr 8); last ported features: GetMcpStatus (Go PR #121, Python PR #516), AlwaysLoad MCP config (Go PR #120, Issue #119)
 
 <!-- END AUTO-MANAGED -->
 
