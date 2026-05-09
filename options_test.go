@@ -885,10 +885,12 @@ func (m *mockTransportForOptions) SendMessage(_ context.Context, _ StreamMessage
 func (m *mockTransportForOptions) ReceiveMessages(_ context.Context) (<-chan Message, <-chan error) {
 	return nil, nil
 }
-func (m *mockTransportForOptions) Interrupt(_ context.Context) error                   { return nil }
-func (m *mockTransportForOptions) SetModel(_ context.Context, _ *string) error         { return nil }
-func (m *mockTransportForOptions) SetPermissionMode(_ context.Context, _ string) error { return nil }
-func (m *mockTransportForOptions) RewindFiles(_ context.Context, _ string) error       { return nil }
+func (m *mockTransportForOptions) Interrupt(_ context.Context) error           { return nil }
+func (m *mockTransportForOptions) SetModel(_ context.Context, _ *string) error { return nil }
+func (m *mockTransportForOptions) SetPermissionMode(_ context.Context, _ PermissionMode) error {
+	return nil
+}
+func (m *mockTransportForOptions) RewindFiles(_ context.Context, _ string) error { return nil }
 func (m *mockTransportForOptions) GetMcpStatus(_ context.Context) (*McpStatusResponse, error) {
 	return &McpStatusResponse{}, nil
 }

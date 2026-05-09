@@ -527,6 +527,30 @@ func TestClientResponseIterator(t *testing.T) {
 	}
 }
 
+// TestClientReceiveResponseNotConnected tests that ReceiveResponse returns a usable
+// (non-nil) iterator even when the client is not connected.
+func TestClientReceiveResponseNotConnected(t *testing.T) {
+	ctx, cancel := setupClientTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newClientMockTransport()
+	client := setupClientForTest(t, transport)
+	// Intentionally do NOT connect
+
+	iter := client.ReceiveResponse(ctx)
+	if iter == nil {
+		t.Fatal("ReceiveResponse returned nil on disconnected client; expected a closed iterator")
+	}
+
+	msg, err := iter.Next(ctx)
+	if err != ErrNoMoreMessages {
+		t.Errorf("Expected ErrNoMoreMessages from closed iterator, got: %v", err)
+	}
+	if msg != nil {
+		t.Errorf("Expected nil message from closed iterator, got: %v", msg)
+	}
+}
+
 // TestClientInterrupt tests interrupt functionality during operations
 // Covers T139: Client Interrupt Functionality
 func TestClientInterrupt(t *testing.T) {
@@ -796,6 +820,47 @@ func TestClientAsyncErrorHandling(t *testing.T) {
 	err := client.Query(ctx, "test query after async error")
 	assertNoError(t, err)
 	assertClientMessageCount(t, transport, 1)
+}
+
+// TestClientQueryStreamSendError tests that QueryStream propagates send errors
+// to the ReceiveResponse iterator rather than silently dropping them (C3).
+func TestClientQueryStreamSendError(t *testing.T) {
+	sendErr := fmt.Errorf("send failed")
+	transport := newClientMockTransportWithOptions(WithClientSendError(sendErr))
+	client := setupClientForTest(t, transport)
+	defer disconnectClientSafely(t, client)
+
+	ctx, cancel := setupClientTestContext(t, 5*time.Second)
+	defer cancel()
+
+	connectClientSafely(ctx, t, client)
+
+	iter := client.ReceiveResponse(ctx)
+	if iter == nil {
+		t.Fatal("Expected non-nil iterator")
+	}
+
+	messages := make(chan StreamMessage, 1)
+	messages <- StreamMessage{
+		Type:    "user",
+		Message: &UserMessage{Content: "hello"},
+	}
+
+	if err := client.QueryStream(ctx, messages); err != nil {
+		t.Fatalf("QueryStream returned unexpected synchronous error: %v", err)
+	}
+
+	// The send error must be propagated to the iterator, not silently dropped.
+	shortCtx, shortCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer shortCancel()
+
+	_, iterErr := iter.Next(shortCtx)
+	if iterErr == nil {
+		t.Fatal("Expected error from iterator after send failure, got nil")
+	}
+	if !strings.Contains(iterErr.Error(), "send failed") {
+		t.Errorf("Expected error containing 'send failed', got: %v", iterErr)
+	}
 }
 
 // TestClientResponseSequencing tests pre-configured response sequences
@@ -1198,7 +1263,7 @@ func (c *clientMockTransport) SetModel(_ context.Context, _ *string) error {
 	return nil
 }
 
-func (c *clientMockTransport) SetPermissionMode(_ context.Context, _ string) error {
+func (c *clientMockTransport) SetPermissionMode(_ context.Context, _ PermissionMode) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.setPermissionModeError != nil {

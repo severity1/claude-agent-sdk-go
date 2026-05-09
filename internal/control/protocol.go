@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -38,6 +39,8 @@ type Protocol struct {
 
 	// State
 	initialized  bool
+	initOnce     sync.Once
+	initErr      error
 	initResponse *InitializeResponse
 	initErrChan  chan error
 	closed       bool
@@ -161,13 +164,13 @@ func (p *Protocol) readLoop() {
 			// Parse the incoming message
 			var msg map[string]any
 			if err := json.Unmarshal(data, &msg); err != nil {
-				// Log parse error but continue
+				fmt.Fprintf(os.Stderr, "claude-agent-sdk: failed to parse control message: %v\n", err)
 				continue
 			}
 
 			// Route the message
 			if err := p.HandleIncomingMessage(p.ctx, msg); err != nil {
-				// Log routing error but continue
+				fmt.Fprintf(os.Stderr, "claude-agent-sdk: failed to route control message: %v\n", err)
 				continue
 			}
 		}
@@ -342,19 +345,22 @@ func (p *Protocol) handleControlResponse(_ context.Context, msg map[string]any) 
 	select {
 	case responseChan <- response:
 	default:
-		// Channel full or closed - ignore
+		fmt.Fprintf(os.Stderr, "claude-agent-sdk: response channel full or closed, dropping response for request %s\n", requestID)
 	}
 
 	return nil
 }
 
 // forwardToStream sends a message to the regular message stream.
+// Returns an error if the buffer is full rather than blocking readLoop.
 func (p *Protocol) forwardToStream(ctx context.Context, msg map[string]any) error {
 	select {
 	case p.messageStream <- msg:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	default:
+		return fmt.Errorf("message stream buffer full, dropping message")
 	}
 }
 
@@ -380,51 +386,50 @@ func (p *Protocol) sendErrorResponse(ctx context.Context, requestID string, errM
 
 // Initialize performs the control protocol handshake with the CLI.
 // This must be called in streaming mode before other control operations.
-// The result is cached - subsequent calls return the cached response.
+// The result is cached - concurrent and subsequent calls return the cached response.
 func (p *Protocol) Initialize(ctx context.Context) (*InitializeResponse, error) {
-	p.mu.Lock()
-	if p.initialized {
-		resp := p.initResponse
-		p.mu.Unlock()
-		return resp, nil
-	}
-	p.mu.Unlock()
+	p.initOnce.Do(func() {
+		// Build initialize request with hooks configuration
+		initReq := InitializeRequest{
+			Subtype: SubtypeInitialize,
+		}
 
-	// Build initialize request with hooks configuration
-	initReq := InitializeRequest{
-		Subtype: SubtypeInitialize,
-	}
+		// Generate hook registrations and build hooks config
+		if p.hooks != nil {
+			initReq.Hooks = p.buildHooksConfig()
+		}
 
-	// Generate hook registrations and build hooks config
-	if p.hooks != nil {
-		initReq.Hooks = p.buildHooksConfig()
-	}
+		// Send initialize request
+		result, err := p.SendControlRequest(ctx, initReq, p.initTimeout)
+		if err != nil {
+			p.initErr = fmt.Errorf("initialize failed: %w", err)
+			return
+		}
 
-	// Send initialize request
-	result, err := p.SendControlRequest(ctx, initReq, p.initTimeout)
-
-	if err != nil {
-		return nil, fmt.Errorf("initialize failed: %w", err)
-	}
-
-	// Parse response
-	var initResp InitializeResponse
-	if resultMap, ok := result.(map[string]any); ok {
-		if cmds, ok := resultMap["supported_commands"].([]any); ok {
-			for _, cmd := range cmds {
-				if cmdStr, ok := cmd.(string); ok {
-					initResp.SupportedCommands = append(initResp.SupportedCommands, cmdStr)
+		// Parse response
+		var initResp InitializeResponse
+		if resultMap, ok := result.(map[string]any); ok {
+			if cmds, ok := resultMap["supported_commands"].([]any); ok {
+				for _, cmd := range cmds {
+					if cmdStr, ok := cmd.(string); ok {
+						initResp.SupportedCommands = append(initResp.SupportedCommands, cmdStr)
+					}
 				}
 			}
 		}
-	}
+
+		p.mu.Lock()
+		p.initialized = true
+		p.initResponse = &initResp
+		p.mu.Unlock()
+	})
 
 	p.mu.Lock()
-	p.initialized = true
-	p.initResponse = &initResp
+	resp := p.initResponse
+	err := p.initErr
 	p.mu.Unlock()
 
-	return &initResp, nil
+	return resp, err
 }
 
 // Interrupt sends an interrupt control request to the CLI.

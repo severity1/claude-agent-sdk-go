@@ -122,7 +122,7 @@ type Transport interface {
 	// SetModel changes the AI model during streaming session.
 	SetModel(ctx context.Context, model *string) error
 	// SetPermissionMode changes the permission mode during streaming session.
-	SetPermissionMode(ctx context.Context, mode string) error
+	SetPermissionMode(ctx context.Context, mode PermissionMode) error
 	// RewindFiles reverts tracked files to their state at a specific user message.
 	// Requires file checkpointing to be enabled and control protocol initialized.
 	RewindFiles(ctx context.Context, userMessageID string) error
@@ -220,6 +220,7 @@ const (
 	SubtypeHookCallback      = control.SubtypeHookCallback
 	SubtypeMcpMessage        = control.SubtypeMcpMessage
 	SubtypeGetMcpStatus      = control.SubtypeGetMcpStatus
+	SubtypeRewindFiles       = control.SubtypeRewindFiles
 
 	// Control response subtypes
 	ResponseSubtypeSuccess = control.ResponseSubtypeSuccess

@@ -53,6 +53,7 @@ type ClientImpl struct {
 	connected       bool
 	msgChan         <-chan Message
 	errChan         <-chan error
+	streamErrChan   chan error // writable; receives errors from QueryStream goroutine
 }
 
 // NewClient creates a new Client with the given options.
@@ -181,8 +182,8 @@ func WithClientTransport(ctx context.Context, transport Transport, fn func(Clien
 	return fn(client)
 }
 
-// validateOptions validates the client configuration options
-func (c *ClientImpl) validateOptions() error {
+// prepareOptions applies defaults and validates the client configuration options.
+func (c *ClientImpl) prepareOptions() error {
 	if c.options == nil {
 		return nil // Nil options are acceptable (use defaults)
 	}
@@ -239,7 +240,7 @@ func (c *ClientImpl) Connect(ctx context.Context, _ ...StreamMessage) error {
 	}
 
 	// Validate configuration before connecting
-	if err := c.validateOptions(); err != nil {
+	if err := c.prepareOptions(); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
@@ -264,6 +265,7 @@ func (c *ClientImpl) Connect(ctx context.Context, _ ...StreamMessage) error {
 
 	// Get message channels
 	c.msgChan, c.errChan = c.transport.ReceiveMessages(ctx)
+	c.streamErrChan = make(chan error, 1)
 
 	c.connected = true
 	return nil
@@ -283,6 +285,7 @@ func (c *ClientImpl) Disconnect() error {
 	c.transport = nil
 	c.msgChan = nil
 	c.errChan = nil
+	c.streamErrChan = nil
 	return nil
 }
 
@@ -358,6 +361,7 @@ func (c *ClientImpl) QueryStream(ctx context.Context, messages <-chan StreamMess
 	c.mu.RLock()
 	connected := c.connected
 	transport := c.transport
+	streamErrChan := c.streamErrChan
 	c.mu.RUnlock()
 
 	if !connected || transport == nil {
@@ -373,7 +377,11 @@ func (c *ClientImpl) QueryStream(ctx context.Context, messages <-chan StreamMess
 					return // Channel closed
 				}
 				if err := transport.SendMessage(ctx, msg); err != nil {
-					// Log error but continue processing
+					fmt.Fprintf(os.Stderr, "claude-agent-sdk: QueryStream send error: %v\n", err)
+					select {
+					case streamErrChan <- fmt.Errorf("stream send error: %w", err):
+					default:
+					}
 					return
 				}
 			case <-ctx.Done():
@@ -411,16 +419,31 @@ func (c *ClientImpl) ReceiveResponse(_ context.Context) MessageIterator {
 	connected := c.connected
 	msgChan := c.msgChan
 	errChan := c.errChan
+	streamErrChan := c.streamErrChan
 	c.mu.RUnlock()
 
 	if !connected || msgChan == nil {
-		return nil
+		closed := make(chan Message)
+		close(closed)
+		return &clientIterator{msgChan: closed, errChan: make(chan error)}
 	}
 
-	// Create a simple iterator over the message channel
+	// Fan-in transport errors and QueryStream errors into one channel for the iterator.
+	mergedErr := make(chan error, 2)
+	go func() {
+		for err := range errChan {
+			mergedErr <- err
+		}
+	}()
+	go func() {
+		for err := range streamErrChan {
+			mergedErr <- err
+		}
+	}()
+
 	return &clientIterator{
 		msgChan: msgChan,
-		errChan: errChan,
+		errChan: mergedErr,
 	}
 }
 
@@ -503,7 +526,7 @@ func (c *ClientImpl) SetPermissionMode(ctx context.Context, mode PermissionMode)
 		return fmt.Errorf("client not connected")
 	}
 
-	return transport.SetPermissionMode(ctx, string(mode))
+	return transport.SetPermissionMode(ctx, mode)
 }
 
 // RewindFiles reverts tracked files to their state at a specific user message.
@@ -560,32 +583,44 @@ func (c *ClientImpl) GetMcpStatus(ctx context.Context) (*McpStatusResponse, erro
 type clientIterator struct {
 	msgChan <-chan Message
 	errChan <-chan error
+	mu      sync.Mutex
 	closed  bool
 }
 
 func (ci *clientIterator) Next(ctx context.Context) (Message, error) {
+	ci.mu.Lock()
 	if ci.closed {
+		ci.mu.Unlock()
 		return nil, ErrNoMoreMessages
 	}
+	ci.mu.Unlock()
 
 	select {
 	case msg, ok := <-ci.msgChan:
 		if !ok {
+			ci.mu.Lock()
 			ci.closed = true
+			ci.mu.Unlock()
 			return nil, ErrNoMoreMessages
 		}
 		return msg, nil
 	case err := <-ci.errChan:
+		ci.mu.Lock()
 		ci.closed = true
+		ci.mu.Unlock()
 		return nil, err
 	case <-ctx.Done():
+		ci.mu.Lock()
 		ci.closed = true
+		ci.mu.Unlock()
 		return nil, ctx.Err()
 	}
 }
 
 func (ci *clientIterator) Close() error {
+	ci.mu.Lock()
 	ci.closed = true
+	ci.mu.Unlock()
 	return nil
 }
 

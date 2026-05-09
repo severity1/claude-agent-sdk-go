@@ -572,6 +572,7 @@ func TestInitializeHandshake(t *testing.T) {
 	t.Run("timeout", testInitializeTimeout)
 	t.Run("error_response", testInitializeErrorResponse)
 	t.Run("cached_result", testInitializeCachedResult)
+	t.Run("concurrent_calls", testInitializeConcurrent)
 }
 
 func testInitializeSuccess(t *testing.T) {
@@ -718,6 +719,68 @@ func testInitializeCachedResult(t *testing.T) {
 	}
 }
 
+// testInitializeConcurrent verifies that concurrent Initialize calls do not race
+// and all callers receive the same cached response (M4).
+func testInitializeConcurrent(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	// Respond once after a short delay - only the first request should be sent.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) > 0 {
+			var req SDKControlRequest
+			if err := json.Unmarshal(transport.writtenData[0], &req); err == nil {
+				transport.mu.Unlock()
+				transport.injectResponse(req.RequestID, map[string]any{
+					"supported_commands": []string{"interrupt"},
+				})
+				return
+			}
+		}
+		transport.mu.Unlock()
+	}()
+
+	const goroutines = 10
+	results := make([]*InitializeResponse, goroutines)
+	errs := make([]error, goroutines)
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = protocol.Initialize(ctx)
+		}()
+	}
+	wg.Wait()
+
+	for i, e := range errs {
+		if e != nil {
+			t.Errorf("goroutine %d got error: %v", i, e)
+		}
+	}
+	for i, r := range results {
+		if r == nil {
+			t.Errorf("goroutine %d got nil response", i)
+			continue
+		}
+		if r != results[0] {
+			t.Errorf("goroutine %d got different response instance (expected cached pointer)", i)
+		}
+	}
+}
+
 // =============================================================================
 // Phase 4: Message Routing Tests
 // =============================================================================
@@ -726,6 +789,7 @@ func TestMessageRouting(t *testing.T) {
 	t.Run("route_control_response", testRouteControlResponse)
 	t.Run("route_regular_message", testRouteRegularMessage)
 	t.Run("route_unknown_type", testRouteUnknownType)
+	t.Run("forward_to_stream_full_buffer", testForwardToStreamFullBuffer)
 }
 
 func testRouteControlResponse(t *testing.T) {
@@ -837,6 +901,46 @@ func testRouteUnknownType(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout waiting for message")
+	}
+}
+
+// testForwardToStreamFullBuffer verifies that forwardToStream returns an error
+// instead of blocking readLoop when the message stream buffer is full (M3).
+func testForwardToStreamFullBuffer(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	// Fill the message stream buffer completely (capacity is 100).
+	for i := 0; i < 100; i++ {
+		msg := map[string]any{"type": "assistant", "index": i}
+		if err := protocol.HandleIncomingMessage(ctx, msg); err != nil {
+			t.Fatalf("unexpected error filling buffer at index %d: %v", i, err)
+		}
+	}
+
+	// One more message should fail fast instead of blocking.
+	overflow := map[string]any{"type": "assistant", "overflow": true}
+	done := make(chan error, 1)
+	go func() {
+		done <- protocol.HandleIncomingMessage(ctx, overflow)
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("expected error when stream buffer is full, got nil")
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Error("HandleIncomingMessage blocked instead of returning an error when buffer is full")
 	}
 }
 
@@ -2061,6 +2165,9 @@ func TestProtocolGetMcpStatus(t *testing.T) {
 	t.Run("success_failed_server", testGetMcpStatusFailed)
 	t.Run("success_multiple_servers", testGetMcpStatusMultiple)
 	t.Run("success_empty_servers", testGetMcpStatusEmpty)
+	t.Run("success_server_info", testGetMcpStatusServerInfo)
+	t.Run("success_tool_annotations", testGetMcpStatusToolAnnotations)
+	t.Run("success_server_config", testGetMcpStatusConfig)
 	t.Run("error_response", testGetMcpStatusError)
 	t.Run("malformed_response", testGetMcpStatusMalformed)
 	t.Run("nil_response", testGetMcpStatusNilResponse)
@@ -2193,6 +2300,191 @@ func testGetMcpStatusFailed(t *testing.T) {
 	assertControlEqual(t, McpServerConnectionStatusFailed, srv.Status)
 	if srv.Error == nil || *srv.Error != errMsg {
 		t.Errorf("expected error %q, got %v", errMsg, srv.Error)
+	}
+}
+
+func testGetMcpStatusServerInfo(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{
+			"mcpServers": []any{
+				map[string]any{
+					"name":   "my-server",
+					"status": "connected",
+					"serverInfo": map[string]any{
+						"name":    "my-server",
+						"version": "1.0.0",
+					},
+				},
+			},
+		})
+	}()
+
+	resp, err := protocol.GetMcpStatus(ctx)
+	assertControlNoError(t, err)
+	if resp == nil || len(resp.McpServers) != 1 {
+		t.Fatal("expected 1 server in response")
+	}
+	srv := resp.McpServers[0]
+	assertControlEqual(t, McpServerConnectionStatusConnected, srv.Status)
+	if srv.ServerInfo == nil {
+		t.Fatal("expected non-nil ServerInfo for connected server")
+	}
+	assertControlEqual(t, "my-server", srv.ServerInfo.Name)
+	assertControlEqual(t, "1.0.0", srv.ServerInfo.Version)
+}
+
+func testGetMcpStatusToolAnnotations(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{
+			"mcpServers": []any{
+				map[string]any{
+					"name":   "annotated-server",
+					"status": "connected",
+					"tools": []any{
+						map[string]any{
+							"name":        "read_file",
+							"description": "reads a file",
+							"annotations": map[string]any{
+								"readOnly":    true,
+								"destructive": false,
+								"openWorld":   true,
+							},
+						},
+					},
+				},
+			},
+		})
+	}()
+
+	resp, err := protocol.GetMcpStatus(ctx)
+	assertControlNoError(t, err)
+	if resp == nil || len(resp.McpServers) != 1 {
+		t.Fatal("expected 1 server in response")
+	}
+	srv := resp.McpServers[0]
+	if len(srv.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(srv.Tools))
+	}
+	tool := srv.Tools[0]
+	if tool.Annotations == nil {
+		t.Fatal("expected non-nil Annotations")
+	}
+	if tool.Annotations.ReadOnly == nil || !*tool.Annotations.ReadOnly {
+		t.Errorf("expected ReadOnly=true, got %v", tool.Annotations.ReadOnly)
+	}
+	if tool.Annotations.Destructive == nil || *tool.Annotations.Destructive {
+		t.Errorf("expected Destructive=false, got %v", tool.Annotations.Destructive)
+	}
+	if tool.Annotations.OpenWorld == nil || !*tool.Annotations.OpenWorld {
+		t.Errorf("expected OpenWorld=true, got %v", tool.Annotations.OpenWorld)
+	}
+}
+
+func testGetMcpStatusConfig(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	cmd := "npx"
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{
+			"mcpServers": []any{
+				map[string]any{
+					"name":   "stdio-server",
+					"status": "connected",
+					"config": map[string]any{
+						"type":    McpServerConfigTypeStdio,
+						"command": cmd,
+						"args":    []any{"-y", "some-server"},
+					},
+				},
+			},
+		})
+	}()
+
+	resp, err := protocol.GetMcpStatus(ctx)
+	assertControlNoError(t, err)
+	if resp == nil || len(resp.McpServers) != 1 {
+		t.Fatal("expected 1 server in response")
+	}
+	srv := resp.McpServers[0]
+	if srv.Config == nil {
+		t.Fatal("expected non-nil Config")
+	}
+	assertControlEqual(t, McpServerConfigTypeStdio, srv.Config.Type)
+	if srv.Config.Command == nil || *srv.Config.Command != cmd {
+		t.Errorf("expected Command=%q, got %v", cmd, srv.Config.Command)
+	}
+	if len(srv.Config.Args) != 2 || srv.Config.Args[0] != "-y" || srv.Config.Args[1] != "some-server" {
+		t.Errorf("expected Args=[-y some-server], got %v", srv.Config.Args)
 	}
 }
 

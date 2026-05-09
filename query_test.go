@@ -165,30 +165,18 @@ func TestQueryMultipleMessageTypes(t *testing.T) {
 
 		if msg != nil {
 			messageCount++
-			// Use Message interface method instead of type assertion to avoid race issues
 			switch msg.Type() {
 			case MessageTypeAssistant:
-				// Try re-exported type first, then shared type for robustness
 				if assistantMsg, ok := msg.(*AssistantMessage); ok {
 					assistantMessages = append(assistantMessages, assistantMsg)
-				} else {
-					// For race conditions, msg might be *shared.AssistantMessage
-					// We can still verify it's an assistant message via the interface
-					assistantMessages = append(assistantMessages, nil) // Count it but don't access fields
 				}
 			case MessageTypeSystem:
 				if systemMsg, ok := msg.(*SystemMessage); ok {
 					systemMessages = append(systemMessages, systemMsg)
-				} else {
-					// Race condition: shared type instead of re-exported type
-					systemMessages = append(systemMessages, nil)
 				}
 			case MessageTypeResult:
 				if resultMsg, ok := msg.(*ResultMessage); ok {
 					resultMessages = append(resultMessages, resultMsg)
-				} else {
-					// Race condition: shared type instead of re-exported type
-					resultMessages = append(resultMessages, nil)
 				}
 			default:
 				t.Errorf("Unexpected message type: %s (actual type: %T)", msg.Type(), msg)
@@ -905,6 +893,7 @@ func (q *queryMockTransport) SendMessage(ctx context.Context, message StreamMess
 	}
 
 	q.receivedMessages = append(q.receivedMessages, message)
+	q.optionsReceived = true
 	return nil
 }
 
@@ -922,7 +911,7 @@ func (q *queryMockTransport) SetModel(_ context.Context, _ *string) error {
 	return nil
 }
 
-func (q *queryMockTransport) SetPermissionMode(_ context.Context, _ string) error {
+func (q *queryMockTransport) SetPermissionMode(_ context.Context, _ PermissionMode) error {
 	return nil
 }
 
@@ -958,15 +947,6 @@ func (q *queryMockTransport) hasReceivedOptions() bool {
 type QueryMockOption func(*queryMockTransport)
 
 func WithQueryAssistantResponse(text string) QueryMockOption {
-	return func(q *queryMockTransport) {
-		q.responseMessages = append(q.responseMessages, &AssistantMessage{
-			Content: []ContentBlock{&TextBlock{Text: text}},
-			Model:   "claude-opus-4-1-20250805",
-		})
-	}
-}
-
-func WithQueryStreamResponse(text string) QueryMockOption {
 	return func(q *queryMockTransport) {
 		q.responseMessages = append(q.responseMessages, &AssistantMessage{
 			Content: []ContentBlock{&TextBlock{Text: text}},
@@ -1097,10 +1077,6 @@ func assertQueryMessageModel(t *testing.T, msg *AssistantMessage, expectedModel 
 
 func assertQueryTransportReceivedOptions(t *testing.T, transport *queryMockTransport, expected bool) {
 	t.Helper()
-	transport.mu.Lock()
-	transport.optionsReceived = expected // Mock implementation would track this
-	transport.mu.Unlock()
-
 	actual := transport.hasReceivedOptions()
 	if actual != expected {
 		t.Errorf("Expected options received = %v, got %v", expected, actual)
