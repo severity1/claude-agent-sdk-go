@@ -930,6 +930,10 @@ func (q *queryMockTransport) RewindFiles(_ context.Context, _ string) error {
 	return nil
 }
 
+func (q *queryMockTransport) GetMcpStatus(_ context.Context) (*McpStatusResponse, error) {
+	return &McpStatusResponse{McpServers: []McpServerStatus{}}, nil
+}
+
 func (q *queryMockTransport) Close() error {
 	q.mu.Lock()
 	defer q.mu.Unlock()

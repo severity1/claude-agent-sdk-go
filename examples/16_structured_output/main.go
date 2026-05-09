@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
@@ -107,7 +108,10 @@ func runTaskExtractionExample() {
 						if msg.Result != nil {
 							return fmt.Errorf("error: %s", *msg.Result)
 						}
-						return fmt.Errorf("error: unknown error")
+						if len(msg.Errors) > 0 {
+							return fmt.Errorf("error (%s): %s", msg.Subtype, strings.Join(msg.Errors, "; "))
+						}
+						return fmt.Errorf("error: unknown error (subtype=%s)", msg.Subtype)
 					}
 					// Capture the structured output
 					structuredOutput = msg.StructuredOutput
@@ -119,7 +123,7 @@ func runTaskExtractionExample() {
 		}
 	},
 		claudecode.WithJSONSchema(taskSchema),
-		claudecode.WithMaxTurns(1),
+		claudecode.WithMaxTurns(3),
 	)
 
 	if err != nil {
@@ -216,7 +220,10 @@ func runContactExtractionExample() {
 						if msg.Result != nil {
 							return fmt.Errorf("error: %s", *msg.Result)
 						}
-						return fmt.Errorf("error: unknown error")
+						if len(msg.Errors) > 0 {
+							return fmt.Errorf("error (%s): %s", msg.Subtype, strings.Join(msg.Errors, "; "))
+						}
+						return fmt.Errorf("error: unknown error (subtype=%s)", msg.Subtype)
 					}
 					structuredOutput = msg.StructuredOutput
 					return nil
@@ -227,7 +234,7 @@ func runContactExtractionExample() {
 		}
 	},
 		claudecode.WithJSONSchema(contactSchema),
-		claudecode.WithMaxTurns(1),
+		claudecode.WithMaxTurns(3),
 	)
 
 	if err != nil {
@@ -300,7 +307,10 @@ func runExplicitOutputFormatExample() {
 						if msg.Result != nil {
 							return fmt.Errorf("error: %s", *msg.Result)
 						}
-						return fmt.Errorf("error: unknown error")
+						if len(msg.Errors) > 0 {
+							return fmt.Errorf("error (%s): %s", msg.Subtype, strings.Join(msg.Errors, "; "))
+						}
+						return fmt.Errorf("error: unknown error (subtype=%s)", msg.Subtype)
 					}
 					structuredOutput = msg.StructuredOutput
 					return nil
@@ -311,7 +321,7 @@ func runExplicitOutputFormatExample() {
 		}
 	},
 		claudecode.WithOutputFormat(outputFormat),
-		claudecode.WithMaxTurns(1),
+		claudecode.WithMaxTurns(3),
 	)
 
 	if err != nil {

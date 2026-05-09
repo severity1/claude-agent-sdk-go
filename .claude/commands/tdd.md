@@ -42,16 +42,31 @@ Retrieve and analyze issue #$ARGUMENTS:
 
 ## Phase 3: Discovery & Planning
 
+**Enter plan mode for this entire phase.** Call `EnterPlanMode` at the start of Phase 3 so all discovery, design decisions, and parity tradeoffs are captured as a plan the user approves before any code is written. The phase ends with `ExitPlanMode` at the *Critical Checkpoint* below. If already in plan mode, `EnterPlanMode` is a no-op — proceed.
+
+### Design Principle: Go Idioms Are First-Class
+
+Parity target is **observable behavior**: JSON wire format, public API surface, CLI flags, message shapes, and semantics exposed to consumers. Internal mechanics (private struct layout, helper return types, control flow shape) are **not** parity targets.
+
+When a Go idiom and a Python internal shape conflict, choose the Go idiom — nil-safety, context-first, `fmt.Errorf` with `%w` wrapping, zero-value usability, small focused interfaces, gofmt/linter conformance, channel-based concurrency — and record the deliberate divergence in the plan (and later in the commit message). The plan presented at `ExitPlanMode` must name each divergence explicitly so the user approves it up front rather than discovering it in review.
+
 ### Codebase Exploration
 
 Understand existing patterns to match the project's conventions:
 
 1. **Review Python SDK Reference:**
-   - **Fetch official documentation** using `curl -s https://platform.claude.com/docs/en/agent-sdk/python.md` - this is the authoritative Python SDK API reference
-   - Locate corresponding implementation in `../claude-agent-sdk-python/` (local clone)
-   - Understand the behavior that needs 100% parity
-   - Note any Go-specific adaptations needed
-   - **Check parity tracker** - Read `docs/tracking/README.md` to find if this issue maps to a tracked Python SDK PR. If a tracker entry exists, use the Python PR number as the authoritative reference and read the corresponding Python source changes for exact behavior to replicate.
+   - **Check parity tracker first** - Read `docs/tracking/README.md` to find if this issue maps to a tracked Python SDK PR. If a tracker entry exists, use the Python PR number as the authoritative reference.
+   - **Read Python source directly** - Tracker notes are intentionally brief summaries, not the full spec. Read the actual Python source files at `../claude-agent-sdk-python/` for exact behavior:
+     - `src/claude_agent_sdk/types.py` - all public type definitions (messages, options, hooks)
+     - `src/claude_agent_sdk/client.py` - public Client interface
+     - `src/claude_agent_sdk/_internal/client.py` - internal client/transport implementation
+     - `src/claude_agent_sdk/_internal/transport/subprocess_cli.py` - subprocess/protocol logic
+     - `src/claude_agent_sdk/_internal/message_parser.py` - message parsing
+     - `src/claude_agent_sdk/_internal/sessions.py` - session management
+     - `src/claude_agent_sdk/_internal/session_mutations.py` - session mutations (rename, tag, etc.)
+   - **Verify exact details from Python source:** field names, JSON tags, optional vs required, default values, serialization behavior - flag any divergence that isn't justified by Go idiom
+   - **Fetch official documentation** using `curl -s https://platform.claude.com/docs/en/agent-sdk/python.md` for public API signatures if helpful
+   - Note any Go-specific adaptations needed (e.g., pointer for optional fields, interface for union types)
 
 2. **Discover Existing Patterns:**
    - Search for similar implementations in the codebase
@@ -91,9 +106,23 @@ Based on exploration and issue requirements, create detailed plan with:
    - Map each requirement to test cases
    - Identify how each will be verified
 
+5. **Size & Complexity Assessment:**
+   Score the issue against these signals and record the result in the plan:
+   - Files touched (create + modify)
+   - Independent types/subsystems introduced (e.g. unrelated message types, separate protocol surfaces)
+   - New public API surface (exported symbols, re-exports in `types.go`)
+   - Python PRs covered by this issue (sometimes one Go issue replays several)
+
+   Decide on the execution strategy based on the score:
+   - **Small (default):** ≤3 files, one subsystem, single Python PR — execute sequentially in a single agent context. Do **not** spawn sub-agents.
+   - **Medium:** 4-8 files or 2-3 independent types — stay sequential for RED/GREEN/BLUE, but in Phase 5 delegate the self code review to parallel `code-reviewer` agents scoped per file or per subsystem (inline `Agent` spawns, never `TeamCreate`).
+   - **Large:** 9+ files, multiple subsystems, or multiple Python PRs — first ask the user whether to split into sub-issues. If the user confirms keeping it as one cycle, then: still sequential RED/GREEN/BLUE (TDD ordering must hold), but spawn parallel reviewers in Phase 5 *and* use an `Explore` agent during Phase 3 to map existing patterns per subsystem instead of doing it inline.
+
+   Never parallelize RED or GREEN test/impl writing across agents — pattern drift and merge conflicts in a single branch outweigh the speedup. Parallelism is a *review* tool, not a *writing* tool.
+
 ### Critical Checkpoint: User Approval
 
-**Use ExitPlanMode tool to present plan and await user approval before proceeding.**
+**Call `ExitPlanMode` to present the plan and await user approval before proceeding.** The plan must include: RED/GREEN/BLUE breakdown, size/complexity score and chosen execution strategy, and an explicit list of any deliberate Go-idiom divergences from Python internals.
 
 Do NOT continue to Phase 4 until user approves the plan.
 
@@ -144,6 +173,11 @@ Generate branch name from issue (e.g., Issue #34 "Add plugins support" becomes `
    go fmt ./...
    go vet ./...
    golangci-lint run
+   gocyclo -over 15 .
+   deadcode -test=true \
+     -filter='github.com/severity1/claude-agent-sdk-go/internal/...' \
+     ./examples/... ./internal/...
+   # Or one-shot: make check
    ```
 2. **Fix any issues found**
 3. **Commit refactoring (if changes made):**
@@ -162,6 +196,10 @@ Push the feature branch to remote with upstream tracking.
 
 ## Phase 5: Self Code Review
 
+**Execution strategy follows the size score from Phase 3:**
+- **Small:** inline self-review using the checklists below.
+- **Medium / Large:** spawn parallel `code-reviewer` agents via the `Agent` tool (one per file or subsystem). Use inline `Agent` spawns only — never `TeamCreate`, `TeamDelete`, or broadcast. Each spawned reviewer receives the checklists below as its brief plus the list of deliberate Go-idiom divergences from the approved plan (so it does not re-flag them). Collect findings, dedupe, then fix.
+
 Before finalizing, review ALL implemented code for:
 
 ### Go Standards Checklist:
@@ -171,6 +209,7 @@ Before finalizing, review ALL implemented code for:
 - [ ] No unnecessary exports (lowercase unexported unless needed)
 - [ ] Interfaces are small and focused
 - [ ] Proper use of defer for cleanup
+- [ ] Go idioms chosen over Python internal shape where they conflict; each deliberate divergence matches the list in the approved Phase 3 plan and is noted in the commit message
 
 ### Security Checklist:
 - [ ] No hardcoded secrets or API keys
@@ -211,10 +250,14 @@ Verify:
 
 ### Python SDK Alignment Check
 
-1. **Compare behavior** with Python SDK reference implementation
-2. **Reference official docs** - `curl -s https://platform.claude.com/docs/en/agent-sdk/python.md` for API signatures and behavior
+1. **Re-read the Python source** at `../claude-agent-sdk-python/` for each implemented feature - verify:
+   - Type names and JSON tags match exactly
+   - Optional vs required fields match (Go: pointer for optional, value for required)
+   - Behavior for edge cases (nil/None, empty collections, error paths) matches
+   - Any field the Python SDK omits with `omitempty` should be omitted in Go too
+2. **Reference official docs** - `curl -s https://platform.claude.com/docs/en/agent-sdk/python.md` for public API signatures
 3. **Verify 100% parity** on all implemented features
-4. **Document any intentional deviations** (Go-specific adaptations)
+4. **Document any intentional deviations** (Go-specific adaptations, e.g., sealed interface for union types)
 5. **Update parity tracker** - If this issue corresponds to a tracked Python PR in `docs/tracking/README.md`, update the entry: set Go Status to `done` and fill in the Go PR number
 
 ### Test Authenticity Verification

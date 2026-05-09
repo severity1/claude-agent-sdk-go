@@ -27,13 +27,16 @@ go test ./...
 Run these before every commit:
 
 ```bash
-go fmt ./...           # Format code
-go vet ./...           # Static analysis
-golangci-lint run      # Comprehensive linting
-gocyclo -over 15 .     # Cyclomatic complexity check
+go fmt ./...                  # Format code
+go vet ./...                  # Static analysis
+golangci-lint run             # Comprehensive linting
+gocyclo -over 15 .            # Cyclomatic complexity check
+deadcode -test=true \         # Find unreachable internal functions
+  -filter='github.com/severity1/claude-agent-sdk-go/internal/...' \
+  ./examples/... ./internal/...
 
 # Or use Makefile (recommended)
-make check             # Run all checks
+make check             # Run all checks (fmt, vet, lint, cyclo, deadcode, fuzz-test)
 ```
 
 ### Cyclomatic Complexity
@@ -53,6 +56,36 @@ gocyclo -over 15 .     # Direct usage
 - Keep functions under complexity 15
 - Higher complexity is acceptable for: table-driven tests, examples, orchestration code
 - When complexity grows, extract helper methods
+
+### Dead Code Detection
+
+We use `golang.org/x/tools/cmd/deadcode` to find unreachable functions in `internal/*`. CI fails if any are detected.
+
+```bash
+# Install deadcode
+go install golang.org/x/tools/cmd/deadcode@latest
+
+# Show unreachable internal functions
+make deadcode
+
+# Or invoke directly:
+deadcode -test=true \
+  -filter='github.com/severity1/claude-agent-sdk-go/internal/...' \
+  ./examples/... ./internal/...
+
+# Fail on any internal dead code (CI mode)
+make deadcode-check
+```
+
+**Why this scope:**
+- The SDK is a library, so its only `main` packages are under `examples/`. Deadcode roots reachability from `main` packages.
+- `-test=true` adds internal test packages as additional roots so test-only helpers (e.g. `Parser.processJSONLine`, mock factories) count as reachable instead of being flagged as dead.
+- The public API (root `claudecode` package) is reachable by external consumers, not by us — running deadcode without a filter would flag every `WithXxx()` option as unused. The `-filter` restricts findings to `internal/*` where unreachability is real waste.
+
+**Guidelines:**
+- Remove unreachable internal helpers instead of suppressing them
+- If a public API symbol drifts (e.g., an option exposed but never wired through `internal/*`), an example or unit test should exercise it so the wiring is reachable
+- For a genuinely reserved internal symbol, document the rationale and add a test that calls it
 
 ### Go Conventions
 

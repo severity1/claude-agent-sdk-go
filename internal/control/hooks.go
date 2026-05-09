@@ -84,6 +84,9 @@ func (p *Protocol) parseHookInput(event HookEvent, inputData map[string]any) any
 			HookEventName: "PreToolUse",
 			ToolName:      getString(inputData, "tool_name"),
 			ToolInput:     getMap(inputData, "tool_input"),
+			ToolUseID:     getString(inputData, "tool_use_id"),
+			AgentID:       getStringPtr(inputData, "agent_id"),
+			AgentType:     getStringPtr(inputData, "agent_type"),
 		}
 	case HookEventPostToolUse:
 		return &PostToolUseHookInput{
@@ -92,6 +95,21 @@ func (p *Protocol) parseHookInput(event HookEvent, inputData map[string]any) any
 			ToolName:      getString(inputData, "tool_name"),
 			ToolInput:     getMap(inputData, "tool_input"),
 			ToolResponse:  inputData["tool_response"],
+			ToolUseID:     getString(inputData, "tool_use_id"),
+			AgentID:       getStringPtr(inputData, "agent_id"),
+			AgentType:     getStringPtr(inputData, "agent_type"),
+		}
+	case HookEventPostToolUseFailure:
+		return &PostToolUseFailureHookInput{
+			BaseHookInput: base,
+			HookEventName: "PostToolUseFailure",
+			ToolName:      getString(inputData, "tool_name"),
+			ToolInput:     getMap(inputData, "tool_input"),
+			ToolUseID:     getString(inputData, "tool_use_id"),
+			Error:         getString(inputData, "error"),
+			IsInterrupt:   getBoolPtr(inputData, "is_interrupt"),
+			AgentID:       getStringPtr(inputData, "agent_id"),
+			AgentType:     getStringPtr(inputData, "agent_type"),
 		}
 	case HookEventUserPromptSubmit:
 		return &UserPromptSubmitHookInput{
@@ -107,9 +125,12 @@ func (p *Protocol) parseHookInput(event HookEvent, inputData map[string]any) any
 		}
 	case HookEventSubagentStop:
 		return &SubagentStopHookInput{
-			BaseHookInput:  base,
-			HookEventName:  "SubagentStop",
-			StopHookActive: getBool(inputData, "stop_hook_active"),
+			BaseHookInput:       base,
+			HookEventName:       "SubagentStop",
+			StopHookActive:      getBool(inputData, "stop_hook_active"),
+			AgentID:             getString(inputData, "agent_id"),
+			AgentTranscriptPath: getString(inputData, "agent_transcript_path"),
+			AgentType:           getString(inputData, "agent_type"),
 		}
 	case HookEventPreCompact:
 		return &PreCompactHookInput{
@@ -118,6 +139,31 @@ func (p *Protocol) parseHookInput(event HookEvent, inputData map[string]any) any
 			Trigger:            getString(inputData, "trigger"),
 			CustomInstructions: getStringPtr(inputData, "custom_instructions"),
 		}
+	case HookEventNotification:
+		return &NotificationHookInput{
+			BaseHookInput:    base,
+			HookEventName:    "Notification",
+			Message:          getString(inputData, "message"),
+			Title:            getStringPtr(inputData, "title"),
+			NotificationType: getString(inputData, "notification_type"),
+		}
+	case HookEventSubagentStart:
+		return &SubagentStartHookInput{
+			BaseHookInput: base,
+			HookEventName: "SubagentStart",
+			AgentID:       getString(inputData, "agent_id"),
+			AgentType:     getString(inputData, "agent_type"),
+		}
+	case HookEventPermissionRequest:
+		return &PermissionRequestHookInput{
+			BaseHookInput:         base,
+			HookEventName:         "PermissionRequest",
+			ToolName:              getString(inputData, "tool_name"),
+			ToolInput:             getMap(inputData, "tool_input"),
+			PermissionSuggestions: getSlice(inputData, "permission_suggestions"),
+			AgentID:               getStringPtr(inputData, "agent_id"),
+			AgentType:             getStringPtr(inputData, "agent_type"),
+		}
 	default:
 		// Forward compatibility - return raw input for unknown events
 		return inputData
@@ -125,38 +171,15 @@ func (p *Protocol) parseHookInput(event HookEvent, inputData map[string]any) any
 }
 
 // sendHookResponse sends a hook callback response back to CLI.
+// Delegates serialization to HookJSONOutput's JSON tags (omitempty) so a
+// new field on the struct flows to the wire without needing an update here.
 func (p *Protocol) sendHookResponse(ctx context.Context, requestID string, result HookJSONOutput) error {
-	// Build response data from HookJSONOutput
-	responseData := make(map[string]any)
-
-	if result.Continue != nil {
-		responseData["continue"] = *result.Continue
-	}
-	if result.SuppressOutput != nil {
-		responseData["suppressOutput"] = *result.SuppressOutput
-	}
-	if result.StopReason != nil {
-		responseData["stopReason"] = *result.StopReason
-	}
-	if result.Decision != nil {
-		responseData["decision"] = *result.Decision
-	}
-	if result.SystemMessage != nil {
-		responseData["systemMessage"] = *result.SystemMessage
-	}
-	if result.Reason != nil {
-		responseData["reason"] = *result.Reason
-	}
-	if result.HookSpecificOutput != nil {
-		responseData["hookSpecificOutput"] = result.HookSpecificOutput
-	}
-
 	response := SDKControlResponse{
 		Type: MessageTypeControlResponse,
 		Response: Response{
 			Subtype:   ResponseSubtypeSuccess,
 			RequestID: requestID,
-			Response:  responseData,
+			Response:  result,
 		},
 	}
 
@@ -166,44 +189,6 @@ func (p *Protocol) sendHookResponse(ctx context.Context, requestID string, resul
 	}
 
 	return p.transport.Write(ctx, append(data, '\n'))
-}
-
-// generateHookRegistrations creates hook registrations for initialization.
-// This builds the hooks config to send to CLI during initialize.
-func (p *Protocol) generateHookRegistrations() []HookRegistration {
-	var registrations []HookRegistration
-
-	if p.hooks == nil {
-		return registrations
-	}
-
-	// Initialize callback map if needed
-	p.hookCallbacksMu.Lock()
-	if p.hookCallbacks == nil {
-		p.hookCallbacks = make(map[string]HookCallback)
-	}
-
-	for _, matchers := range p.hooks {
-		for _, matcher := range matchers {
-			for _, callback := range matcher.Hooks {
-				// Generate callback ID matching Python SDK format
-				callbackID := fmt.Sprintf("hook_%d", p.nextHookCallback)
-				p.nextHookCallback++
-
-				// Store callback for later lookup
-				p.hookCallbacks[callbackID] = callback
-
-				registrations = append(registrations, HookRegistration{
-					CallbackID: callbackID,
-					Matcher:    matcher.Matcher,
-					Timeout:    matcher.Timeout,
-				})
-			}
-		}
-	}
-	p.hookCallbacksMu.Unlock()
-
-	return registrations
 }
 
 // buildHooksConfig creates the hooks config for the initialize request.
@@ -216,8 +201,10 @@ func (p *Protocol) buildHooksConfig() map[string][]HookMatcherConfig {
 
 	config := make(map[string][]HookMatcherConfig)
 
-	// Initialize callback map if needed
+	// Initialize callback map if needed. defer the unlock so future edits
+	// that add early returns inside this function cannot leak the lock.
 	p.hookCallbacksMu.Lock()
+	defer p.hookCallbacksMu.Unlock()
 	if p.hookCallbacks == nil {
 		p.hookCallbacks = make(map[string]HookCallback)
 	}
@@ -249,7 +236,6 @@ func (p *Protocol) buildHooksConfig() map[string][]HookMatcherConfig {
 			config[eventName] = matcherConfigs
 		}
 	}
-	p.hookCallbacksMu.Unlock()
 
 	return config
 }
@@ -277,9 +263,27 @@ func getBool(m map[string]any, key string) bool {
 	return false
 }
 
+// getMap returns the map at key, or an empty map if absent or wrong type.
+// Matches Python SDK behavior (hook inputs always receive a dict for fields
+// like tool_input) and avoids nil-map assignment panics in callbacks that
+// mutate the returned map.
 func getMap(m map[string]any, key string) map[string]any {
 	if v, ok := m[key].(map[string]any); ok {
 		return v
 	}
 	return make(map[string]any)
+}
+
+func getBoolPtr(m map[string]any, key string) *bool {
+	if v, ok := m[key].(bool); ok {
+		return &v
+	}
+	return nil
+}
+
+func getSlice(m map[string]any, key string) []any {
+	if v, ok := m[key].([]any); ok {
+		return v
+	}
+	return nil
 }

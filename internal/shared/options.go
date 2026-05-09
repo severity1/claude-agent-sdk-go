@@ -2,6 +2,7 @@ package shared
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 )
@@ -108,10 +109,14 @@ type SdkPluginConfig struct {
 	Path string `json:"path"`
 }
 
+// OutputFormatTypeJSONSchema is the only currently-supported value for
+// OutputFormat.Type. Matches the Messages API structured-output wire contract.
+const OutputFormatTypeJSONSchema = "json_schema"
+
 // OutputFormat specifies the format for structured output.
 // Matches the Messages API structure: {"type": "json_schema", "schema": {...}}
 type OutputFormat struct {
-	Type   string         `json:"type"`   // Always "json_schema"
+	Type   string         `json:"type"`   // Always OutputFormatTypeJSONSchema
 	Schema map[string]any `json:"schema"` // JSON Schema definition
 }
 
@@ -144,6 +149,65 @@ type AgentDefinition struct {
 	Model AgentModel `json:"model,omitempty"`
 }
 
+// ThinkingConfig configures the model's extended thinking behavior.
+// Use one of: ThinkingConfigAdaptive, ThinkingConfigEnabled, ThinkingConfigDisabled.
+// Go idiom: unexported marker method seals the interface (prevents external implementations).
+type ThinkingConfig interface {
+	thinkingConfig() // unexported - seals the union
+}
+
+// Thinking config wire discriminator values. Match Python SDK
+// ThinkingConfig{Adaptive,Enabled,Disabled}.type literals.
+const (
+	thinkingConfigTypeAdaptive = "adaptive"
+	thinkingConfigTypeEnabled  = "enabled"
+	thinkingConfigTypeDisabled = "disabled"
+)
+
+// ThinkingConfigAdaptive lets the model decide its thinking budget adaptively.
+type ThinkingConfigAdaptive struct{}
+
+func (ThinkingConfigAdaptive) thinkingConfig() {}
+
+// MarshalJSON emits the Python-SDK-compatible discriminator so this variant
+// roundtrips correctly if ever serialized (e.g., in future control-protocol
+// payloads that carry thinking config on the wire).
+func (ThinkingConfigAdaptive) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type string `json:"type"`
+	}{Type: thinkingConfigTypeAdaptive})
+}
+
+// ThinkingConfigEnabled enables thinking with an explicit token budget.
+type ThinkingConfigEnabled struct {
+	// BudgetTokens is the maximum number of thinking tokens.
+	BudgetTokens int `json:"budget_tokens"`
+}
+
+func (ThinkingConfigEnabled) thinkingConfig() {}
+
+// MarshalJSON emits the Python-SDK-compatible discriminator alongside
+// budget_tokens so this variant roundtrips correctly on the wire.
+func (t ThinkingConfigEnabled) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type         string `json:"type"`
+		BudgetTokens int    `json:"budget_tokens"`
+	}{Type: thinkingConfigTypeEnabled, BudgetTokens: t.BudgetTokens})
+}
+
+// ThinkingConfigDisabled disables extended thinking explicitly.
+type ThinkingConfigDisabled struct{}
+
+func (ThinkingConfigDisabled) thinkingConfig() {}
+
+// MarshalJSON emits the Python-SDK-compatible discriminator so this variant
+// roundtrips correctly if ever serialized.
+func (ThinkingConfigDisabled) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type string `json:"type"`
+	}{Type: thinkingConfigTypeDisabled})
+}
+
 // Options configures the Claude Agent SDK behavior.
 type Options struct {
 	// Tool Control
@@ -162,7 +226,20 @@ type Options struct {
 	AppendSystemPrompt *string `json:"append_system_prompt,omitempty"`
 	Model              *string `json:"model,omitempty"`
 	FallbackModel      *string `json:"fallback_model,omitempty"`
-	MaxThinkingTokens  int     `json:"max_thinking_tokens,omitempty"`
+	// MaxThinkingTokens is the legacy thinking-budget knob.
+	//
+	// Deprecated: Use Thinking (ThinkingConfig) instead. When Thinking is set
+	// it takes precedence over MaxThinkingTokens.
+	MaxThinkingTokens int `json:"max_thinking_tokens,omitempty"`
+
+	// Thinking configures the model's extended thinking behavior.
+	// When set, takes precedence over MaxThinkingTokens.
+	// Use ThinkingConfigAdaptive, ThinkingConfigEnabled, or ThinkingConfigDisabled.
+	Thinking ThinkingConfig `json:"-"` // Converted to CLI flags, not JSON-serialized
+
+	// Effort sets the model's reasoning effort level.
+	// Valid values: "low", "medium", "high", "max".
+	Effort *string `json:"effort,omitempty"`
 
 	// Budget & Billing
 	MaxBudgetUSD *float64 `json:"max_budget_usd,omitempty"`
@@ -240,8 +317,14 @@ type Options struct {
 	// If nil, all tool requests are denied (secure default).
 	// Callback panics are recovered to prevent crashing the SDK.
 	// Matches Python SDK's can_use_tool callback behavior.
-	// Note: The actual types are defined in internal/control to avoid import cycles.
-	// Use the claudecode package's WithCanUseTool option for type-safe configuration.
+	//
+	// WARNING: This field is typed as any to avoid an import cycle between
+	// shared and internal/control. Do not set it directly - use the
+	// claudecode package's WithCanUseTool option, which wraps the callback
+	// with the required any<->control.ToolPermissionContext conversion. A
+	// direct assignment that returns a value not assertable to
+	// control.PermissionResult is treated as a bug and surfaced loudly
+	// rather than silently denying.
 	CanUseTool func(
 		ctx context.Context,
 		toolName string,
@@ -252,7 +335,12 @@ type Options struct {
 	// Hooks contains lifecycle event hook registrations.
 	// The actual type is map[control.HookEvent][]control.HookMatcher.
 	// Stored as any to avoid import cycles with internal/control package.
-	// Use the claudecode package's WithHook option for type-safe configuration.
+	//
+	// WARNING: Do not set this field directly - use the claudecode package's
+	// WithHook / WithHooks options. A direct assignment whose underlying
+	// type does not match map[control.HookEvent][]control.HookMatcher is
+	// silently ignored at transport wire-up time, which will make hook
+	// callbacks appear to be registered but never fire.
 	Hooks any `json:"-"` // Not serialized
 }
 
@@ -356,11 +444,20 @@ func (c *McpSdkServerConfig) GetType() McpServerType {
 	return McpServerTypeSdk
 }
 
+// McpToolAnnotations describes tool behavior hints for MCP tools.
+// Used in McpToolDefinition for SDK MCP server tool definitions.
+type McpToolAnnotations struct {
+	ReadOnly    *bool `json:"readOnly,omitempty"`
+	Destructive *bool `json:"destructive,omitempty"`
+	OpenWorld   *bool `json:"openWorld,omitempty"`
+}
+
 // McpToolDefinition describes a tool exposed by an MCP server.
 type McpToolDefinition struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	InputSchema map[string]any      `json:"inputSchema"`
+	Annotations *McpToolAnnotations `json:"annotations,omitempty"`
 }
 
 // McpToolResult represents the result of a tool call.
@@ -386,6 +483,11 @@ func (o *Options) Validate() error {
 		return fmt.Errorf("MaxThinkingTokens must be non-negative, got %d", o.MaxThinkingTokens)
 	}
 
+	// Validate ThinkingConfigEnabled.BudgetTokens when present.
+	if enabled, ok := o.Thinking.(ThinkingConfigEnabled); ok && enabled.BudgetTokens < 0 {
+		return fmt.Errorf("ThinkingConfigEnabled.BudgetTokens must be non-negative, got %d", enabled.BudgetTokens)
+	}
+
 	// Validate MaxTurns
 	if o.MaxTurns < 0 {
 		return fmt.Errorf("MaxTurns must be non-negative, got %d", o.MaxTurns)
@@ -402,6 +504,20 @@ func (o *Options) Validate() error {
 			return fmt.Errorf("tool '%s' cannot be in both AllowedTools and DisallowedTools", tool)
 		}
 	}
+
+	// Validate OutputFormat.Type when set. The only currently-supported wire
+	// value is "json_schema"; empty is permitted for callers that leave the
+	// zero value (OutputFormat unset).
+	if o.OutputFormat != nil && o.OutputFormat.Type != "" && o.OutputFormat.Type != OutputFormatTypeJSONSchema {
+		return fmt.Errorf("OutputFormat.Type must be %q, got %q", OutputFormatTypeJSONSchema, o.OutputFormat.Type)
+	}
+
+	// AgentDefinition.Model is intentionally not validated beyond string type:
+	// Python's AgentDefinition documents Model as "alias or full model ID" and
+	// performs no validation, so rejecting strings the Python SDK accepts
+	// would break parity and prevent callers from pinning specific versions
+	// (e.g. "claude-opus-4-7"). The CLI is the source of truth for which
+	// model IDs resolve; let it surface unknown values.
 
 	return nil
 }

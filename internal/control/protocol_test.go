@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
 
 // Test constants for model names used across dynamic control tests.
@@ -62,6 +64,7 @@ func testSubtypeConstants(t *testing.T) {
 		{"hook_callback", SubtypeHookCallback, "hook_callback"},
 		{"mcp_message", SubtypeMcpMessage, "mcp_message"},
 		{"rewind_files", SubtypeRewindFiles, "rewind_files"},
+		{"get_mcp_status", SubtypeGetMcpStatus, "get_mcp_status"},
 	}
 
 	for _, tc := range tests {
@@ -896,6 +899,760 @@ func testInterruptSendsRequest(t *testing.T) {
 		t.Fatal("request should be a map")
 	}
 	assertControlEqual(t, SubtypeInterrupt, request["subtype"])
+}
+
+// =============================================================================
+// Phase 7: GetMcpStatus Tests (Python SDK PR #516)
+// =============================================================================
+
+func TestGetMcpStatus(t *testing.T) {
+	t.Run("returns_mcp_server_statuses", testGetMcpStatusReturnsServers)
+	t.Run("handles_empty_servers", testGetMcpStatusEmptyServers)
+	t.Run("request_has_correct_subtype", testGetMcpStatusRequestSubtype)
+}
+
+func testGetMcpStatusReturnsServers(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	// Auto-respond with MCP status data
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{
+			"mcpServers": []any{
+				map[string]any{
+					"name":   "my-server",
+					"status": "connected",
+					"serverInfo": map[string]any{
+						"name":    "My MCP Server",
+						"version": "1.0.0",
+					},
+				},
+				map[string]any{
+					"name":   "failing-server",
+					"status": "failed",
+					"error":  "connection refused",
+				},
+			},
+		})
+	}()
+
+	result, err := protocol.GetMcpStatus(ctx)
+	assertControlNoError(t, err)
+
+	if result == nil {
+		t.Fatal("expected non-nil McpStatusResponse")
+		return
+	}
+	if len(result.McpServers) != 2 {
+		t.Fatalf("expected 2 servers, got %d", len(result.McpServers))
+	}
+
+	connected := result.McpServers[0]
+	assertControlEqual(t, "my-server", connected.Name)
+	assertControlEqual(t, McpServerConnectionStatus("connected"), connected.Status)
+	if connected.ServerInfo == nil {
+		t.Fatal("expected non-nil ServerInfo for connected server")
+		return
+	}
+	assertControlEqual(t, "My MCP Server", connected.ServerInfo.Name)
+
+	failed := result.McpServers[1]
+	assertControlEqual(t, "failing-server", failed.Name)
+	assertControlEqual(t, McpServerConnectionStatus("failed"), failed.Status)
+	if failed.Error == nil {
+		t.Fatal("expected non-nil Error for failed server")
+		return
+	}
+	assertControlEqual(t, "connection refused", *failed.Error)
+}
+
+func testGetMcpStatusEmptyServers(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	// Respond with empty server list
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{
+			"mcpServers": []any{},
+		})
+	}()
+
+	result, err := protocol.GetMcpStatus(ctx)
+	assertControlNoError(t, err)
+
+	if result == nil {
+		t.Fatal("expected non-nil McpStatusResponse")
+		return
+	}
+	if len(result.McpServers) != 0 {
+		t.Errorf("expected 0 servers, got %d", len(result.McpServers))
+	}
+}
+
+func testGetMcpStatusRequestSubtype(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{"mcpServers": []any{}})
+	}()
+
+	_, err = protocol.GetMcpStatus(ctx)
+	assertControlNoError(t, err)
+
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+
+	if len(transport.writtenData) == 0 {
+		t.Fatal("expected request to be sent")
+		return
+	}
+
+	var req SDKControlRequest
+	err = json.Unmarshal(transport.writtenData[0], &req)
+	assertControlNoError(t, err)
+
+	request, ok := req.Request.(map[string]any)
+	if !ok {
+		t.Fatal("request should be a map")
+		return
+	}
+	assertControlEqual(t, SubtypeGetMcpStatus, request["subtype"])
+}
+
+// =============================================================================
+// Phase 8: Agents-in-Initialize Tests (Python SDK PR #468)
+// =============================================================================
+
+func TestInitializeWithAgents(t *testing.T) {
+	t.Run("agents_included_in_request", testInitializeIncludesAgents)
+	t.Run("no_agents_field_when_empty", testInitializeNoAgentsWhenEmpty)
+}
+
+func testInitializeIncludesAgents(t *testing.T) {
+	t.Helper()
+
+	data, err := json.Marshal(InitializeRequest{
+		Subtype: SubtypeInitialize,
+		Agents: map[string]map[string]any{
+			"researcher": {
+				"description": "A research agent",
+				"prompt":      "You research topics thoroughly.",
+				"tools":       []string{"Read", "WebSearch"},
+				"model":       "sonnet",
+			},
+		},
+	})
+	assertControlNoError(t, err)
+
+	var parsed map[string]any
+	err = json.Unmarshal(data, &parsed)
+	assertControlNoError(t, err)
+
+	assertControlEqual(t, SubtypeInitialize, parsed["subtype"])
+
+	agents, ok := parsed["agents"].(map[string]any)
+	if !ok {
+		t.Fatal("expected agents field in initialize request")
+		return
+	}
+
+	researcher, ok := agents["researcher"].(map[string]any)
+	if !ok {
+		t.Fatal("expected researcher agent in agents map")
+		return
+	}
+	assertControlEqual(t, "A research agent", researcher["description"])
+	assertControlEqual(t, "You research topics thoroughly.", researcher["prompt"])
+	assertControlEqual(t, "sonnet", researcher["model"])
+}
+
+func testInitializeNoAgentsWhenEmpty(t *testing.T) {
+	t.Helper()
+
+	data, err := json.Marshal(InitializeRequest{
+		Subtype: SubtypeInitialize,
+	})
+	assertControlNoError(t, err)
+
+	var parsed map[string]any
+	err = json.Unmarshal(data, &parsed)
+	assertControlNoError(t, err)
+
+	// agents field should be omitted when nil
+	if _, exists := parsed["agents"]; exists {
+		t.Error("agents field should be omitted when nil")
+	}
+}
+
+// TestInitializeWithOptions_AgentsFlowEndToEnd exercises the full WithOptions
+// path: NewProtocol(WithOptions(opts)) -> Initialize() -> SendControlRequest
+// must include the agents map built from opts.Agents in the wire payload.
+func TestInitializeWithOptions_AgentsFlowEndToEnd(t *testing.T) {
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	opts := shared.NewOptions()
+	opts.Agents = map[string]shared.AgentDefinition{
+		"researcher": {
+			Description: "Researches topics",
+			Prompt:      "Be thorough.",
+			Tools:       []string{"Read", "WebSearch"},
+			Model:       shared.AgentModelSonnet,
+		},
+	}
+
+	protocol := NewProtocol(transport, WithOptions(opts))
+	if err := protocol.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+		return
+	}
+	defer func() { _ = protocol.Close() }()
+
+	// Auto-respond to the initialize request so Initialize() doesn't block.
+	go func() {
+		// Give the writer a moment to land the request bytes.
+		for i := 0; i < 50; i++ {
+			transport.mu.Lock()
+			n := len(transport.writtenData)
+			transport.mu.Unlock()
+			if n > 0 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{
+			"supported_commands": []any{"interrupt"},
+		})
+	}()
+
+	if _, err := protocol.Initialize(ctx); err != nil {
+		t.Fatalf("initialize: %v", err)
+		return
+	}
+
+	// Inspect the captured initialize request payload.
+	transport.mu.Lock()
+	if len(transport.writtenData) == 0 {
+		transport.mu.Unlock()
+		t.Fatal("expected at least one written request")
+		return
+	}
+	first := transport.writtenData[0]
+	transport.mu.Unlock()
+
+	var envelope map[string]any
+	if err := json.Unmarshal(first, &envelope); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+		return
+	}
+	reqInner, ok := envelope["request"].(map[string]any)
+	if !ok {
+		t.Fatal("expected request inner object")
+		return
+	}
+	agents, ok := reqInner["agents"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected agents map in initialize request, got %v", reqInner)
+		return
+	}
+	researcher, ok := agents["researcher"].(map[string]any)
+	if !ok {
+		t.Fatal("expected researcher agent in agents map")
+		return
+	}
+	if researcher["description"] != "Researches topics" {
+		t.Errorf("description = %v, want 'Researches topics'", researcher["description"])
+	}
+	if researcher["model"] != string(shared.AgentModelSonnet) {
+		t.Errorf("model = %v, want %v", researcher["model"], shared.AgentModelSonnet)
+	}
+}
+
+// TestGetMcpStatus_ErrorResponse verifies error subtypes propagate from CLI.
+func TestGetMcpStatus_ErrorResponse(t *testing.T) {
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+	if err := protocol.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+		return
+	}
+	defer func() { _ = protocol.Close() }()
+
+	go func() {
+		for i := 0; i < 50; i++ {
+			transport.mu.Lock()
+			n := len(transport.writtenData)
+			transport.mu.Unlock()
+			if n > 0 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			t.Errorf("unmarshal captured request: %v", err)
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectErrorResponse(req.RequestID, "CLI failed to enumerate MCP servers")
+	}()
+
+	_, err := protocol.GetMcpStatus(ctx)
+	if err == nil {
+		t.Fatal("expected error from GetMcpStatus when CLI returns error subtype")
+		return
+	}
+	if !strings.Contains(err.Error(), "CLI failed to enumerate MCP servers") {
+		t.Errorf("error %q should contain CLI error message", err)
+	}
+}
+
+// TestGetMcpStatus_AllConnectionStatuses covers needs-auth, pending, disabled
+// in addition to the connected/failed already covered in testGetMcpStatusReturnsServers.
+func TestGetMcpStatus_AllConnectionStatuses(t *testing.T) {
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+	if err := protocol.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+		return
+	}
+	defer func() { _ = protocol.Close() }()
+
+	go func() {
+		for i := 0; i < 50; i++ {
+			transport.mu.Lock()
+			n := len(transport.writtenData)
+			transport.mu.Unlock()
+			if n > 0 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		_ = json.Unmarshal(transport.writtenData[0], &req)
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{
+			"mcpServers": []any{
+				map[string]any{"name": "auth-server", "status": "needs-auth"},
+				map[string]any{"name": "starting-server", "status": "pending"},
+				map[string]any{"name": "off-server", "status": "disabled"},
+			},
+		})
+	}()
+
+	result, err := protocol.GetMcpStatus(ctx)
+	assertControlNoError(t, err)
+	if result == nil || len(result.McpServers) != 3 {
+		t.Fatalf("expected 3 servers, got %v", result)
+		return
+	}
+
+	wantStatuses := []McpServerConnectionStatus{
+		McpServerConnectionStatus("needs-auth"),
+		McpServerConnectionStatus("pending"),
+		McpServerConnectionStatus("disabled"),
+	}
+	for i, want := range wantStatuses {
+		if result.McpServers[i].Status != want {
+			t.Errorf("server[%d].Status = %q, want %q", i, result.McpServers[i].Status, want)
+		}
+	}
+}
+
+// =============================================================================
+// Phase 9: McpToolAnnotations Tests (Python SDK PR #551)
+// =============================================================================
+
+func TestMcpToolAnnotations(t *testing.T) {
+	t.Run("json_round_trip", testMcpToolAnnotationsRoundTrip)
+	t.Run("omits_nil_fields", testMcpToolAnnotationsOmitsNilFields)
+	t.Run("subtype_constant_value", testGetMcpStatusSubtypeConstant)
+}
+
+func testMcpToolAnnotationsRoundTrip(t *testing.T) {
+	t.Helper()
+
+	trueVal := true
+	falseVal := false
+	annotations := McpToolAnnotations{
+		ReadOnly:    &trueVal,
+		Destructive: &falseVal,
+		OpenWorld:   &trueVal,
+	}
+
+	data, err := json.Marshal(annotations)
+	assertControlNoError(t, err)
+
+	var parsed McpToolAnnotations
+	err = json.Unmarshal(data, &parsed)
+	assertControlNoError(t, err)
+
+	if parsed.ReadOnly == nil || *parsed.ReadOnly != true {
+		t.Error("expected ReadOnly=true")
+	}
+	if parsed.Destructive == nil || *parsed.Destructive != false {
+		t.Error("expected Destructive=false")
+	}
+	if parsed.OpenWorld == nil || *parsed.OpenWorld != true {
+		t.Error("expected OpenWorld=true")
+	}
+}
+
+func testMcpToolAnnotationsOmitsNilFields(t *testing.T) {
+	t.Helper()
+
+	trueVal := true
+	annotations := McpToolAnnotations{
+		ReadOnly: &trueVal,
+	}
+
+	data, err := json.Marshal(annotations)
+	assertControlNoError(t, err)
+
+	var parsed map[string]any
+	err = json.Unmarshal(data, &parsed)
+	assertControlNoError(t, err)
+
+	if _, exists := parsed["destructive"]; exists {
+		t.Error("destructive field should be omitted when nil")
+	}
+	if _, exists := parsed["openWorld"]; exists {
+		t.Error("openWorld field should be omitted when nil")
+	}
+}
+
+func testGetMcpStatusSubtypeConstant(t *testing.T) {
+	t.Helper()
+	assertControlEqual(t, "get_mcp_status", SubtypeGetMcpStatus)
+}
+
+// =============================================================================
+// Phase 10: Post-review fixes (silent failures, parity gaps)
+// =============================================================================
+
+// TestGetMcpStatus_PreservesConfigField verifies McpServerStatus.config (Python
+// PR #516) round-trips through GetMcpStatus. Captures the server's wire-format
+// configuration (URL, type, etc.) so callers can introspect it.
+func TestGetMcpStatus_PreservesConfigField(t *testing.T) {
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		_ = json.Unmarshal(transport.writtenData[0], &req)
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{
+			"mcpServers": []any{
+				map[string]any{
+					"name":   "http-server",
+					"status": "connected",
+					"config": map[string]any{
+						"type": "http",
+						"url":  "https://example.com/mcp",
+					},
+				},
+				map[string]any{
+					"name":   "sdk-server",
+					"status": "connected",
+					"config": map[string]any{
+						"type": "sdk",
+						"name": "sdk-server",
+					},
+				},
+			},
+		})
+	}()
+
+	result, err := protocol.GetMcpStatus(ctx)
+	assertControlNoError(t, err)
+	if result == nil || len(result.McpServers) != 2 {
+		t.Fatalf("expected 2 servers, got %+v", result)
+		return
+	}
+
+	httpCfg := result.McpServers[0].Config
+	if httpCfg == nil {
+		t.Fatal("expected Config for http-server, got nil")
+		return
+	}
+	assertControlEqual(t, "http", httpCfg["type"])
+	assertControlEqual(t, "https://example.com/mcp", httpCfg["url"])
+
+	sdkCfg := result.McpServers[1].Config
+	if sdkCfg == nil {
+		t.Fatal("expected Config for sdk-server, got nil")
+		return
+	}
+	assertControlEqual(t, "sdk", sdkCfg["type"])
+}
+
+// TestHandleIncomingControlRequest_EmptyRequestIDRejected verifies that control
+// requests missing or empty request_id are rejected rather than silently
+// processed with an empty ID the CLI cannot correlate.
+func TestHandleIncomingControlRequest_EmptyRequestIDRejected(t *testing.T) {
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	msg := map[string]any{
+		"type": MessageTypeControlRequest,
+		// request_id intentionally omitted
+		"request": map[string]any{
+			"subtype":   SubtypeCanUseTool,
+			"tool_name": "Read",
+			"input":     map[string]any{},
+		},
+	}
+
+	err = protocol.HandleIncomingMessage(ctx, msg)
+	if err == nil {
+		t.Fatal("expected error for empty request_id, got nil")
+		return
+	}
+	if !strings.Contains(err.Error(), "request_id") {
+		t.Errorf("expected error mentioning request_id, got: %v", err)
+	}
+}
+
+// TestHandleIncomingControlRequest_UnknownSubtypeSendsError verifies forward-
+// compat behavior: when the CLI sends a control_request with a subtype the SDK
+// does not recognize, we must reply with an error response (not silently
+// ignore) so the CLI does not block waiting for the request_id to resolve.
+func TestHandleIncomingControlRequest_UnknownSubtypeSendsError(t *testing.T) {
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	msg := map[string]any{
+		"type":       MessageTypeControlRequest,
+		"request_id": "req_unknown_subtype",
+		"request": map[string]any{
+			"subtype": "future_subtype_not_yet_supported",
+		},
+	}
+
+	err = protocol.HandleIncomingMessage(ctx, msg)
+	assertControlNoError(t, err)
+
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+
+	if len(transport.writtenData) == 0 {
+		t.Fatal("expected error response to be written")
+	}
+
+	var resp SDKControlResponse
+	if err := json.Unmarshal(transport.writtenData[0], &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	assertControlEqual(t, MessageTypeControlResponse, resp.Type)
+	assertControlEqual(t, ResponseSubtypeError, resp.Response.Subtype)
+	assertControlEqual(t, "req_unknown_subtype", resp.Response.RequestID)
+	if !strings.Contains(resp.Response.Error, "future_subtype_not_yet_supported") {
+		t.Errorf("error message should mention the unknown subtype, got: %q", resp.Response.Error)
+	}
+}
+
+// TestPermissionResult_MarshalJSONProducesBehavior verifies that the
+// MarshalJSON methods on PermissionResultAllow/Deny always emit the "behavior"
+// discriminator on the wire, regardless of the Behavior field's value.
+func TestPermissionResult_MarshalJSONProducesBehavior(t *testing.T) {
+	t.Run("allow_forces_allow_behavior", func(t *testing.T) {
+		data, err := json.Marshal(PermissionResultAllow{Behavior: "ignored-value"})
+		assertControlNoError(t, err)
+		var parsed map[string]any
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+			return
+		}
+		assertControlEqual(t, "allow", parsed["behavior"])
+	})
+
+	t.Run("deny_forces_deny_behavior", func(t *testing.T) {
+		data, err := json.Marshal(PermissionResultDeny{Behavior: "ignored", Message: "nope"})
+		assertControlNoError(t, err)
+		var parsed map[string]any
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+			return
+		}
+		assertControlEqual(t, "deny", parsed["behavior"])
+		assertControlEqual(t, "nope", parsed["message"])
+	})
+}
+
+// TestSendPermissionResponse_UsesMarshalJSON verifies the wire bytes emitted
+// by sendPermissionResponse contain the behavior field sourced from the
+// PermissionResult's MarshalJSON (exercises the code path end-to-end).
+func TestSendPermissionResponse_UsesMarshalJSON(t *testing.T) {
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+
+	callback := func(_ context.Context, _ string, _ map[string]any, _ ToolPermissionContext) (PermissionResult, error) {
+		// Intentional wrong Behavior value - MarshalJSON must override it.
+		return PermissionResultAllow{Behavior: "wrong"}, nil
+	}
+
+	protocol := NewProtocol(transport, WithCanUseToolCallback(callback))
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	request := map[string]any{
+		"type":       MessageTypeControlRequest,
+		"request_id": "req_marshal_test",
+		"request": map[string]any{
+			"subtype":   SubtypeCanUseTool,
+			"tool_name": "Read",
+			"input":     map[string]any{},
+		},
+	}
+	err = protocol.HandleIncomingMessage(ctx, request)
+	assertControlNoError(t, err)
+
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	if len(transport.writtenData) == 0 {
+		t.Fatal("expected written response")
+		return
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(transport.writtenData[0], &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+		return
+	}
+	resp, ok := parsed["response"].(map[string]any)
+	if !ok {
+		t.Fatalf("response field missing or wrong type: %v", parsed)
+		return
+	}
+	inner, ok := resp["response"].(map[string]any)
+	if !ok {
+		t.Fatalf("inner response missing: %v", resp)
+		return
+	}
+	assertControlEqual(t, "allow", inner["behavior"])
 }
 
 // =============================================================================
@@ -1809,6 +2566,91 @@ func testPermissionCallbackPanicRecovery(t *testing.T) {
 
 	// Should be an error response due to panic
 	assertControlEqual(t, ResponseSubtypeError, resp.Response.Subtype)
+}
+
+// TestPermissionContext_ToolUseIDAndAgentID verifies that tool_use_id and
+// agent_id from the incoming can_use_tool request are forwarded to the
+// callback via ToolPermissionContext. The CLI populates these fields on
+// every permission request (Python PR #754); dropping them leaves callbacks
+// unable to identify which tool call (or subagent) is being gated.
+func TestPermissionContext_ToolUseIDAndAgentID(t *testing.T) {
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+
+	var gotCtx ToolPermissionContext
+	callback := func(_ context.Context, _ string, _ map[string]any, tpc ToolPermissionContext) (PermissionResult, error) {
+		gotCtx = tpc
+		return NewPermissionResultAllow(), nil
+	}
+
+	protocol := NewProtocol(transport, WithCanUseToolCallback(callback))
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	request := map[string]any{
+		"type":       MessageTypeControlRequest,
+		"request_id": "req_ctx_1",
+		"request": map[string]any{
+			"subtype":     SubtypeCanUseTool,
+			"tool_name":   "Read",
+			"input":       map[string]any{"file_path": "/tmp/x"},
+			"tool_use_id": "toolu_01ABCDEF",
+			"agent_id":    "agent_42",
+		},
+	}
+
+	err = protocol.HandleIncomingMessage(ctx, request)
+	assertControlNoError(t, err)
+
+	if gotCtx.ToolUseID == nil || *gotCtx.ToolUseID != "toolu_01ABCDEF" {
+		t.Errorf("ToolUseID = %v, want %q", gotCtx.ToolUseID, "toolu_01ABCDEF")
+	}
+	if gotCtx.AgentID == nil || *gotCtx.AgentID != "agent_42" {
+		t.Errorf("AgentID = %v, want %q", gotCtx.AgentID, "agent_42")
+	}
+}
+
+// TestPermissionContext_ToolUseIDAndAgentID_Absent verifies that missing
+// tool_use_id / agent_id leaves the context pointers nil, matching the
+// Python SDK's None default.
+func TestPermissionContext_ToolUseIDAndAgentID_Absent(t *testing.T) {
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+
+	var gotCtx ToolPermissionContext
+	callback := func(_ context.Context, _ string, _ map[string]any, tpc ToolPermissionContext) (PermissionResult, error) {
+		gotCtx = tpc
+		return NewPermissionResultAllow(), nil
+	}
+
+	protocol := NewProtocol(transport, WithCanUseToolCallback(callback))
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	request := map[string]any{
+		"type":       MessageTypeControlRequest,
+		"request_id": "req_ctx_2",
+		"request": map[string]any{
+			"subtype":   SubtypeCanUseTool,
+			"tool_name": "Read",
+			"input":     map[string]any{},
+		},
+	}
+	err = protocol.HandleIncomingMessage(ctx, request)
+	assertControlNoError(t, err)
+
+	if gotCtx.ToolUseID != nil {
+		t.Errorf("ToolUseID = %v, want nil", *gotCtx.ToolUseID)
+	}
+	if gotCtx.AgentID != nil {
+		t.Errorf("AgentID = %v, want nil", *gotCtx.AgentID)
+	}
 }
 
 // TestPermissionTypeSerialization tests JSON serialization of permission types.

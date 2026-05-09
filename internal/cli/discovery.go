@@ -153,7 +153,8 @@ func addOptionsToCommand(cmd []string, options *shared.Options) []string {
 	cmd = addModelAndPromptFlags(cmd, options)
 	cmd = addPermissionFlags(cmd, options)
 	cmd = addSessionFlags(cmd, options)
-	cmd = addAgentFlags(cmd, options)
+	// Note: Agents are no longer sent via --agents CLI flag.
+	// They are sent via the Initialize control protocol request instead.
 	cmd = addFileSystemFlags(cmd, options)
 	cmd = addMCPFlags(cmd, options)
 	cmd = addPluginsFlag(cmd, options)
@@ -210,10 +211,24 @@ func addModelAndPromptFlags(cmd []string, options *shared.Options) []string {
 	if options.MaxBudgetUSD != nil {
 		cmd = append(cmd, "--max-budget-usd", fmt.Sprintf("%.2f", *options.MaxBudgetUSD))
 	}
-	// NOTE: --max-thinking-tokens not supported by current CLI version
-	// if options.MaxThinkingTokens > 0 {
-	//	cmd = append(cmd, "--max-thinking-tokens", fmt.Sprintf("%d", options.MaxThinkingTokens))
-	// }
+	// Handle ThinkingConfig (takes precedence over MaxThinkingTokens when set).
+	// "enabled" maps to --max-thinking-tokens (not --thinking enabled) to match
+	// the Python SDK wire format in subprocess_cli.py.
+	if options.Thinking != nil {
+		switch t := options.Thinking.(type) {
+		case shared.ThinkingConfigAdaptive:
+			cmd = append(cmd, "--thinking", "adaptive")
+		case shared.ThinkingConfigEnabled:
+			cmd = append(cmd, "--max-thinking-tokens", fmt.Sprintf("%d", t.BudgetTokens))
+		case shared.ThinkingConfigDisabled:
+			cmd = append(cmd, "--thinking", "disabled")
+		}
+	} else if options.MaxThinkingTokens > 0 { //nolint:staticcheck // backward-compat support for the deprecated legacy knob
+		cmd = append(cmd, "--max-thinking-tokens", fmt.Sprintf("%d", options.MaxThinkingTokens)) //nolint:staticcheck // backward-compat support for the deprecated legacy knob
+	}
+	if options.Effort != nil {
+		cmd = append(cmd, "--effort", *options.Effort)
+	}
 	// NOTE: User and MaxBufferSize are internal SDK options without CLI flag mappings
 	return cmd
 }
@@ -246,51 +261,21 @@ func addSessionFlags(cmd []string, options *shared.Options) []string {
 	if options.ForkSession {
 		cmd = append(cmd, "--fork-session")
 	}
-	// Always pass --setting-sources (Python SDK parity)
-	// Empty slice results in empty string value
-	sourcesValue := ""
-	if len(options.SettingSources) > 0 {
+	// Emit --setting-sources only when SettingSources is non-nil, matching
+	// Python's "if effective_setting_sources is not None" guard (PR #778).
+	// A nil slice means "use CLI default"; an empty slice means "load nothing"
+	// and must still emit --setting-sources= so the CLI honors the override.
+	if options.SettingSources != nil {
 		strs := make([]string, len(options.SettingSources))
 		for i, s := range options.SettingSources {
 			strs[i] = string(s)
 		}
-		sourcesValue = strings.Join(strs, ",")
+		cmd = append(cmd, "--setting-sources", strings.Join(strs, ","))
 	}
-	cmd = append(cmd, "--setting-sources", sourcesValue)
 	if options.IncludePartialMessages {
 		cmd = append(cmd, "--include-partial-messages")
 	}
 	return cmd
-}
-
-func addAgentFlags(cmd []string, options *shared.Options) []string {
-	if len(options.Agents) == 0 {
-		return cmd
-	}
-
-	// Convert to map[string]map[string]any, filtering nil/empty fields
-	// This matches Python SDK behavior of omitting None values
-	agentsMap := make(map[string]map[string]any)
-	for name, agent := range options.Agents {
-		agentMap := map[string]any{
-			"description": agent.Description,
-			"prompt":      agent.Prompt,
-		}
-		if len(agent.Tools) > 0 {
-			agentMap["tools"] = agent.Tools
-		}
-		if agent.Model != "" {
-			agentMap["model"] = string(agent.Model)
-		}
-		agentsMap[name] = agentMap
-	}
-
-	data, err := json.Marshal(agentsMap)
-	if err != nil {
-		return cmd // Skip on serialization error
-	}
-
-	return append(cmd, "--agents", string(data))
 }
 
 func addFileSystemFlags(cmd []string, options *shared.Options) []string {

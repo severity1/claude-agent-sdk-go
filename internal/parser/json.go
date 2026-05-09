@@ -97,10 +97,9 @@ func (p *Parser) ParseMessage(data map[string]any) (shared.Message, error) {
 	case shared.MessageTypeStreamEvent:
 		return p.parseStreamEventMessage(data)
 	default:
-		return nil, shared.NewMessageParseError(
-			fmt.Sprintf("unknown message type: %s", msgType),
-			data,
-		)
+		// Return raw message for forward-compatibility instead of erroring.
+		// New CLI versions may add message types unknown to this SDK version.
+		return &shared.RawMessage{MessageType: msgType, Data: data}, nil
 	}
 }
 
@@ -118,17 +117,17 @@ func (p *Parser) BufferSize() int {
 	return p.buffer.Len()
 }
 
-// processJSONLine attempts to parse accumulated buffer as JSON using speculative parsing.
-// This is the core of the speculative parsing strategy from the Python SDK.
+// processJSONLine is the thread-safe entry point for speculative parsing:
+// acquires p.mu, then delegates to processJSONLineUnlocked.
 func (p *Parser) processJSONLine(jsonLine string) (shared.Message, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
 	return p.processJSONLineUnlocked(jsonLine)
 }
 
-// processJSONLineUnlocked is the unlocked version of processJSONLine.
-// Must be called with mutex already held.
+// processJSONLineUnlocked is the speculative parser core: caller must hold p.mu.
+// Reads accumulated buffer plus the new line, attempts to parse, and returns the
+// message on success.
 func (p *Parser) processJSONLineUnlocked(jsonLine string) (shared.Message, error) {
 	p.buffer.WriteString(jsonLine)
 
@@ -244,11 +243,25 @@ func (p *Parser) parseAssistantMessage(data map[string]any) (*shared.AssistantMe
 		blocks[i] = block
 	}
 
-	// Parse optional error field
+	// Parse optional error field from top-level data (not messageData).
+	// The error field is at the top level of the JSON, not inside the nested message object.
 	var errorPtr *shared.AssistantMessageError
-	if errorStr, ok := messageData["error"].(string); ok {
-		errType := shared.AssistantMessageError(errorStr)
-		errorPtr = &errType
+	if errObj, ok := data["error"].(map[string]any); ok {
+		// Error is an object; prefer the "type" discriminator when present.
+		// Objects without a "type" field collapse to the Unknown sentinel so
+		// callers always compare against typed AssistantMessageError constants
+		// (IsRateLimited() and friends never match raw JSON blobs).
+		if errType, ok := errObj["type"].(string); ok && errType != "" {
+			errVal := shared.AssistantMessageError(errType)
+			errorPtr = &errVal
+		} else {
+			errVal := shared.AssistantMessageErrorUnknown
+			errorPtr = &errVal
+		}
+	} else if errorStr, ok := data["error"].(string); ok {
+		// Error can also be a plain string (backward compat)
+		errVal := shared.AssistantMessageError(errorStr)
+		errorPtr = &errVal
 	}
 
 	// parent_tool_use_id is set on assistant messages produced inside a subagent
@@ -280,45 +293,55 @@ func (p *Parser) parseSystemMessage(data map[string]any) (*shared.SystemMessage,
 	}, nil
 }
 
+// parseResultRequiredFields populates the required fields on a ResultMessage.
+// Kept separate from parseResultMessage so that the latter's cyclomatic
+// complexity stays under the gocyclo threshold as optional fields grow.
+func parseResultRequiredFields(result *shared.ResultMessage, data map[string]any) error {
+	subtype, ok := data["subtype"].(string)
+	if !ok {
+		return shared.NewMessageParseError("result message missing subtype field", data)
+	}
+	result.Subtype = subtype
+
+	durationMS, ok := data["duration_ms"].(float64)
+	if !ok {
+		return shared.NewMessageParseError("result message missing or invalid duration_ms field", data)
+	}
+	result.DurationMs = int(durationMS)
+
+	durationAPIMS, ok := data["duration_api_ms"].(float64)
+	if !ok {
+		return shared.NewMessageParseError("result message missing or invalid duration_api_ms field", data)
+	}
+	result.DurationAPIMs = int(durationAPIMS)
+
+	isError, ok := data["is_error"].(bool)
+	if !ok {
+		return shared.NewMessageParseError("result message missing or invalid is_error field", data)
+	}
+	result.IsError = isError
+
+	numTurns, ok := data["num_turns"].(float64)
+	if !ok {
+		return shared.NewMessageParseError("result message missing or invalid num_turns field", data)
+	}
+	result.NumTurns = int(numTurns)
+
+	sessionID, ok := data["session_id"].(string)
+	if !ok {
+		return shared.NewMessageParseError("result message missing session_id field", data)
+	}
+	result.SessionID = sessionID
+
+	return nil
+}
+
 // parseResultMessage parses a result message from raw JSON data.
 func (p *Parser) parseResultMessage(data map[string]any) (*shared.ResultMessage, error) {
 	result := &shared.ResultMessage{}
 
-	// Required fields with validation
-	if subtype, ok := data["subtype"].(string); ok {
-		result.Subtype = subtype
-	} else {
-		return nil, shared.NewMessageParseError("result message missing subtype field", data)
-	}
-
-	if durationMS, ok := data["duration_ms"].(float64); ok {
-		result.DurationMs = int(durationMS)
-	} else {
-		return nil, shared.NewMessageParseError("result message missing or invalid duration_ms field", data)
-	}
-
-	if durationAPIMS, ok := data["duration_api_ms"].(float64); ok {
-		result.DurationAPIMs = int(durationAPIMS)
-	} else {
-		return nil, shared.NewMessageParseError("result message missing or invalid duration_api_ms field", data)
-	}
-
-	if isError, ok := data["is_error"].(bool); ok {
-		result.IsError = isError
-	} else {
-		return nil, shared.NewMessageParseError("result message missing or invalid is_error field", data)
-	}
-
-	if numTurns, ok := data["num_turns"].(float64); ok {
-		result.NumTurns = int(numTurns)
-	} else {
-		return nil, shared.NewMessageParseError("result message missing or invalid num_turns field", data)
-	}
-
-	if sessionID, ok := data["session_id"].(string); ok {
-		result.SessionID = sessionID
-	} else {
-		return nil, shared.NewMessageParseError("result message missing session_id field", data)
+	if err := parseResultRequiredFields(result, data); err != nil {
+		return nil, err
 	}
 
 	// Optional fields (no validation errors if missing)
@@ -375,10 +398,8 @@ func (p *Parser) parseContentBlock(blockData any) (shared.ContentBlock, error) {
 	case shared.ContentBlockTypeToolResult:
 		return p.parseToolResultBlock(data)
 	default:
-		return nil, shared.NewMessageParseError(
-			fmt.Sprintf("unknown content block type: %s", blockType),
-			data,
-		)
+		// Return raw content block for forward-compatibility.
+		return &shared.RawContentBlock{RawBlockType: blockType, Data: data}, nil
 	}
 }
 

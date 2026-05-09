@@ -5,8 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 	"time"
+
+	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
 
 // DefaultInitTimeout is the default timeout for the Initialize handshake.
@@ -58,6 +61,9 @@ type Protocol struct {
 	// SDK MCP servers for in-process tool handling (Issue #7)
 	sdkMcpServers map[string]McpServer
 
+	// Options for passing agents and other config into Initialize request
+	options *shared.Options
+
 	// Background goroutine management
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -103,6 +109,14 @@ func WithHookCallbacks(callbacks map[string]HookCallback) ProtocolOption {
 func WithSdkMcpServers(servers map[string]McpServer) ProtocolOption {
 	return func(p *Protocol) {
 		p.sdkMcpServers = servers
+	}
+}
+
+// WithOptions passes the SDK options to the protocol so it can include
+// agents and other options in the Initialize request.
+func WithOptions(opts *shared.Options) ProtocolOption {
+	return func(p *Protocol) {
+		p.options = opts
 	}
 }
 
@@ -158,16 +172,20 @@ func (p *Protocol) readLoop() {
 				return
 			}
 
-			// Parse the incoming message
+			// Parse the incoming message. Malformed JSON from the CLI is rare
+			// and indicates a real bug; surface it so users can debug instead of
+			// timing out silently.
 			var msg map[string]any
 			if err := json.Unmarshal(data, &msg); err != nil {
-				// Log parse error but continue
+				log.Printf("claude-sdk: control protocol: failed to parse incoming message (%d bytes): %v", len(data), err)
 				continue
 			}
 
-			// Route the message
+			// Route the message. A routing failure means a pending request will
+			// never get its response; surface it so the eventual timeout has
+			// context.
 			if err := p.HandleIncomingMessage(p.ctx, msg); err != nil {
-				// Log routing error but continue
+				log.Printf("claude-sdk: control protocol: failed to route incoming message: %v", err)
 				continue
 			}
 		}
@@ -287,6 +305,11 @@ func (p *Protocol) handleIncomingControlRequest(ctx context.Context, msg map[str
 
 	subtype, _ := request["subtype"].(string)
 	requestID, _ := msg["request_id"].(string)
+	if requestID == "" {
+		// Without a request_id the CLI cannot correlate our reply; refuse
+		// rather than send an un-routable response.
+		return fmt.Errorf("invalid control request: missing request_id")
+	}
 
 	switch subtype {
 	case SubtypeCanUseTool:
@@ -296,8 +319,11 @@ func (p *Protocol) handleIncomingControlRequest(ctx context.Context, msg map[str
 	case SubtypeMcpMessage:
 		return p.handleMcpMessageRequest(ctx, requestID, request)
 	default:
-		// Unknown subtype - ignore for forward compatibility
-		return nil
+		// Unknown subtype: send an error response so the CLI doesn't wait
+		// forever for a reply to this requestID. This preserves forward
+		// compatibility (we don't crash) while still completing the protocol
+		// roundtrip with a meaningful failure.
+		return p.sendErrorResponse(ctx, requestID, fmt.Sprintf("unsupported control request subtype: %q", subtype))
 	}
 }
 
@@ -390,7 +416,7 @@ func (p *Protocol) Initialize(ctx context.Context) (*InitializeResponse, error) 
 	}
 	p.mu.Unlock()
 
-	// Build initialize request with hooks configuration
+	// Build initialize request with hooks and agents configuration
 	initReq := InitializeRequest{
 		Subtype: SubtypeInitialize,
 	}
@@ -398,6 +424,25 @@ func (p *Protocol) Initialize(ctx context.Context) (*InitializeResponse, error) 
 	// Generate hook registrations and build hooks config
 	if p.hooks != nil {
 		initReq.Hooks = p.buildHooksConfig()
+	}
+
+	// Include agents if configured
+	if p.options != nil && len(p.options.Agents) > 0 {
+		agentsMap := make(map[string]map[string]any, len(p.options.Agents))
+		for name, agent := range p.options.Agents {
+			agentData := map[string]any{
+				"description": agent.Description,
+				"prompt":      agent.Prompt,
+			}
+			if len(agent.Tools) > 0 {
+				agentData["tools"] = agent.Tools
+			}
+			if agent.Model != "" {
+				agentData["model"] = string(agent.Model)
+			}
+			agentsMap[name] = agentData
+		}
+		initReq.Agents = agentsMap
 	}
 
 	// Send initialize request
@@ -476,6 +521,31 @@ func (p *Protocol) RewindFiles(ctx context.Context, userMessageID string) error 
 	}, 5*time.Second)
 
 	return err
+}
+
+// GetMcpStatus returns the current status of all connected MCP servers.
+// Returns error if the control request fails or times out.
+func (p *Protocol) GetMcpStatus(ctx context.Context) (*McpStatusResponse, error) {
+	responseData, err := p.SendControlRequest(ctx, GetMcpStatusRequest{
+		Subtype: SubtypeGetMcpStatus,
+	}, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("get_mcp_status request failed: %w", err)
+	}
+
+	// responseData is map[string]any from the "response" field;
+	// marshal then unmarshal to get a typed struct.
+	data, err := json.Marshal(responseData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal mcp status response: %w", err)
+	}
+
+	var result McpStatusResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse mcp status response: %w", err)
+	}
+
+	return &result, nil
 }
 
 // ReceiveMessages returns a channel for receiving regular (non-control) messages.

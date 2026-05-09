@@ -4,16 +4,31 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
 
+// Permission behavior wire-format constants (sent to the CLI as the
+// discriminator for PermissionResult variants). Always sourced from these
+// constants — the Behavior field on the structs is informational and ignored
+// during marshaling.
+const (
+	permissionBehaviorAllow = "allow"
+	permissionBehaviorDeny  = "deny"
+)
+
+// McpToolAnnotations describes tool behavior hints.
+// Type alias from shared to avoid duplication across packages.
+type McpToolAnnotations = shared.McpToolAnnotations
+
 // Message type constants for control protocol discrimination.
+// Aliased from shared so the wire-format string lives in one place.
 const (
 	// MessageTypeControlRequest is sent TO the CLI to request an action.
-	MessageTypeControlRequest = "control_request"
+	MessageTypeControlRequest = shared.MessageTypeControlRequest
 	// MessageTypeControlResponse is received FROM the CLI as a response.
-	MessageTypeControlResponse = "control_response"
+	MessageTypeControlResponse = shared.MessageTypeControlResponse
 )
 
 // Request subtype constants matching Python SDK for 100% parity.
@@ -34,6 +49,8 @@ const (
 	SubtypeMcpMessage = "mcp_message"
 	// SubtypeRewindFiles requests file rewind to a specific user message state.
 	SubtypeRewindFiles = "rewind_files"
+	// SubtypeGetMcpStatus requests the current status of all MCP servers.
+	SubtypeGetMcpStatus = "get_mcp_status"
 )
 
 // Response subtype constants for control responses.
@@ -91,6 +108,9 @@ type InitializeRequest struct {
 	// Hooks contains hook registrations keyed by event type.
 	// Format: {"PreToolUse": [...], "PostToolUse": [...]}
 	Hooks map[string][]HookMatcherConfig `json:"hooks,omitempty"`
+	// Agents contains programmatic subagent definitions keyed by agent name.
+	// Format: {"name": {"description": "...", "prompt": "...", "tools": [...], "model": "..."}}
+	Agents map[string]map[string]any `json:"agents,omitempty"`
 }
 
 // InitializeResponse contains the CLI's response to initialization.
@@ -125,6 +145,68 @@ type RewindFilesRequest struct {
 	// UserMessageID is the UUID of the user message to rewind to.
 	// This should be obtained from UserMessage.UUID received during the session.
 	UserMessageID string `json:"user_message_id"`
+}
+
+// =============================================================================
+// MCP Status Types (Python SDK PR #516)
+// =============================================================================
+
+// McpServerConnectionStatus represents the connection state of an MCP server.
+type McpServerConnectionStatus string
+
+const (
+	// McpServerConnectionStatusConnected indicates the server is connected.
+	McpServerConnectionStatusConnected McpServerConnectionStatus = "connected"
+	// McpServerConnectionStatusFailed indicates the server connection failed.
+	McpServerConnectionStatusFailed McpServerConnectionStatus = "failed"
+	// McpServerConnectionStatusNeedsAuth indicates the server requires authentication.
+	McpServerConnectionStatusNeedsAuth McpServerConnectionStatus = "needs-auth"
+	// McpServerConnectionStatusPending indicates the server connection is pending.
+	McpServerConnectionStatusPending McpServerConnectionStatus = "pending"
+	// McpServerConnectionStatusDisabled indicates the server is disabled.
+	McpServerConnectionStatusDisabled McpServerConnectionStatus = "disabled"
+)
+
+// McpServerInfo contains version info about a connected MCP server.
+type McpServerInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// McpToolInfo describes a tool exposed by an MCP server (for status reporting).
+// NOTE: This is distinct from shared.McpToolDefinition (used for SDK MCP server tool definitions).
+// This type is used in McpServerStatus.Tools to report available tools from connected servers.
+type McpToolInfo struct {
+	Name        string              `json:"name"`
+	Description *string             `json:"description,omitempty"`
+	Annotations *McpToolAnnotations `json:"annotations,omitempty"`
+}
+
+// McpServerStatus represents the status of a connected MCP server.
+//
+// Config captures the server's wire-format configuration (URL for
+// HTTP/SSE servers, type/name for SDK servers, claudeai-proxy details).
+// It mirrors Python SDK's McpServerStatusConfig union as a raw map; a
+// typed union may be introduced in a later parity phase.
+type McpServerStatus struct {
+	Name       string                    `json:"name"`
+	Status     McpServerConnectionStatus `json:"status"`
+	ServerInfo *McpServerInfo            `json:"serverInfo,omitempty"`
+	Error      *string                   `json:"error,omitempty"`
+	Config     map[string]any            `json:"config,omitempty"`
+	Scope      *string                   `json:"scope,omitempty"`
+	Tools      []McpToolInfo             `json:"tools,omitempty"`
+}
+
+// McpStatusResponse is the response payload from a get_mcp_status request.
+type McpStatusResponse struct {
+	McpServers []McpServerStatus `json:"mcpServers"`
+}
+
+// GetMcpStatusRequest requests the current status of all MCP servers.
+type GetMcpStatusRequest struct {
+	// Subtype is always SubtypeGetMcpStatus.
+	Subtype string `json:"subtype"`
 }
 
 // =============================================================================
@@ -183,6 +265,14 @@ type ToolPermissionContext struct {
 	Signal any `json:"-"`
 	// Suggestions contains permission suggestions from CLI.
 	Suggestions []PermissionUpdate `json:"suggestions,omitempty"`
+	// ToolUseID identifies which tool call triggered this permission request.
+	// Distinct tool_use_ids let callbacks disambiguate multiple concurrent
+	// tool calls within the same assistant message. Nil when the CLI did not
+	// supply one (older CLI versions).
+	ToolUseID *string `json:"tool_use_id,omitempty"`
+	// AgentID identifies the subagent that triggered the permission request,
+	// or nil when the main agent triggered it.
+	AgentID *string `json:"agent_id,omitempty"`
 }
 
 // PermissionResult is the interface for permission callback results.
@@ -192,10 +282,12 @@ type PermissionResult interface {
 }
 
 // PermissionResultAllow permits tool execution with optional modifications.
-// Behavior field is always "allow" - this is the discriminator for CLI.
+// Behavior is informational and always serialized as "allow" regardless of
+// field value (see MarshalJSON), so callers cannot accidentally invert the
+// discriminator by mutating the field.
 type PermissionResultAllow struct {
 	// Behavior is always "allow".
-	Behavior string `json:"behavior"`
+	Behavior string `json:"-"`
 	// UpdatedInput contains the modified tool input (optional).
 	UpdatedInput map[string]any `json:"updatedInput,omitempty"`
 	// UpdatedPermissions contains dynamic permission updates (optional).
@@ -205,17 +297,27 @@ type PermissionResultAllow struct {
 // permissionResult implements PermissionResult marker interface.
 func (PermissionResultAllow) permissionResult() {}
 
+// MarshalJSON forces behavior:"allow" on the wire regardless of struct state.
+func (a PermissionResultAllow) MarshalJSON() ([]byte, error) {
+	type alias PermissionResultAllow
+	return json.Marshal(struct {
+		Behavior string `json:"behavior"`
+		alias
+	}{Behavior: permissionBehaviorAllow, alias: alias(a)})
+}
+
 // NewPermissionResultAllow creates an Allow result with proper defaults.
 // Go idiom: constructor functions for types with required fields.
 func NewPermissionResultAllow() PermissionResultAllow {
-	return PermissionResultAllow{Behavior: "allow"}
+	return PermissionResultAllow{Behavior: permissionBehaviorAllow}
 }
 
 // PermissionResultDeny prevents tool execution.
-// Behavior field is always "deny" - this is the discriminator for CLI.
+// Behavior is informational and always serialized as "deny" regardless of
+// field value (see MarshalJSON).
 type PermissionResultDeny struct {
 	// Behavior is always "deny".
-	Behavior string `json:"behavior"`
+	Behavior string `json:"-"`
 	// Message is the reason for denial.
 	Message string `json:"message,omitempty"`
 	// Interrupt indicates whether to interrupt the session.
@@ -225,9 +327,18 @@ type PermissionResultDeny struct {
 // permissionResult implements PermissionResult marker interface.
 func (PermissionResultDeny) permissionResult() {}
 
+// MarshalJSON forces behavior:"deny" on the wire regardless of struct state.
+func (d PermissionResultDeny) MarshalJSON() ([]byte, error) {
+	type alias PermissionResultDeny
+	return json.Marshal(struct {
+		Behavior string `json:"behavior"`
+		alias
+	}{Behavior: permissionBehaviorDeny, alias: alias(d)})
+}
+
 // NewPermissionResultDeny creates a Deny result with proper defaults.
 func NewPermissionResultDeny(message string) PermissionResultDeny {
-	return PermissionResultDeny{Behavior: "deny", Message: message}
+	return PermissionResultDeny{Behavior: permissionBehaviorDeny, Message: message}
 }
 
 // CanUseToolCallback is invoked when CLI requests permission to use a tool.

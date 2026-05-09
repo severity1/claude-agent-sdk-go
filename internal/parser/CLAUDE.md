@@ -34,6 +34,11 @@ parser/
 - Speculative parsing: Match Python SDK behavior for streaming JSON
 - Type discrimination: Use `"type"` field to determine message type
 - `tool_use_result` extraction: `parseUserMessage` reads top-level `tool_use_result` map and passes it into `UserMessage.ToolUseResult`
+- Control message routing: `control_request` and `control_response` types return `&shared.RawControlMessage{MessageType, Data}` - bypasses user-facing message stream, handled by control protocol layer
+- Stream event handling: `stream_event` type dispatched to `parseStreamEventMessage`
+- Forward-compat: unknown message types return `&shared.RawMessage{MessageType, Data}` instead of an error - new CLI versions can add types without breaking older SDK versions
+- parseResultRequiredFields helper: required fields of ResultMessage (subtype, duration_ms, duration_api_ms, is_error, num_turns, session_id) extracted into a standalone function to keep `parseResultMessage` cyclomatic complexity under the gocyclo threshold as optional fields grow
+- AssistantMessage error constants: `parseAssistantMessage` uses typed `shared.AssistantMessageError` constants, never raw strings; error objects without a "type" field collapse directly to `AssistantMessageErrorUnknown` (not marshaled to JSON string); callers always compare against typed constants via `HasError()`/`IsRateLimited()`
 
 <!-- END AUTO-MANAGED -->
 

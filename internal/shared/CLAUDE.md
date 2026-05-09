@@ -36,6 +36,15 @@ shared/
 - `UUID`, `ParentToolUseID`: optional string pointers
 - `ToolUseResult map[string]any`: rich edit metadata (filePath, structuredPatch, diffs); use `HasToolUseResult()` / `GetToolUseResult()`
 
+**Options types (options.go)**:
+- `ThinkingConfig` interface (sealed): `ThinkingConfigAdaptive`, `ThinkingConfigEnabled{BudgetTokens int \`json:"budget_tokens"\`}`, `ThinkingConfigDisabled`; all three implement `MarshalJSON` emitting Python-SDK-compatible `"type"` discriminator; `ThinkingConfigEnabled` also emits `budget_tokens`; private constants `thinkingConfigTypeAdaptive/Enabled/Disabled` hold wire values
+- `AgentDefinition{Description, Prompt, Tools, Model}` with `AgentModel` constants (sonnet/opus/haiku/inherit)
+- `SandboxSettings{Enabled, AutoAllowBashIfSandboxed, ExcludedCommands, Network, IgnoreViolations}`
+- `SandboxNetworkConfig{AllowUnixSockets, AllowAllUnixSockets, AllowLocalBinding, HTTPProxyPort, SOCKSProxyPort}`
+- `ToolsPreset{Type: "preset", Preset}` - preset tools config (e.g., "claude_code")
+- `SettingSource` (user/project/local), `SdkBeta`, `SdkPluginType`/`SdkPluginConfig{Type, Path}`
+- `OutputFormat{Type: "json_schema", Schema map[string]any}` - structured JSON output; `OutputFormatTypeJSONSchema` constant defined here, re-exported in root `types.go`
+
 <!-- END AUTO-MANAGED -->
 
 <!-- AUTO-MANAGED: conventions -->
@@ -45,6 +54,8 @@ shared/
 - Custom JSON unmarshaling: Use `json.RawMessage` for delayed parsing
 - Type discrimination: Switch on `"type"` field for union types
 - Error wrapping: Use `%w` verb for error chain support
+- Sealed union pattern: Unexported marker method (e.g. `thinkingConfig()`) prevents external implementations of union interfaces like `ThinkingConfig`
+- Options validation: `Options.Validate()` enforces field constraints (MaxThinkingTokens/MaxTurns non-negative, no tool conflicts, OutputFormat.Type must be "json_schema" if set, ThinkingConfigEnabled.BudgetTokens non-negative); AgentDefinition.Model is intentionally not validated - Python SDK accepts alias or full model ID without restriction, so Go SDK defers to CLI as source of truth
 
 <!-- END AUTO-MANAGED -->
 

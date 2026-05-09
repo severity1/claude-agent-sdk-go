@@ -222,6 +222,10 @@ func (t *Transport) setupControlProtocol(ctx context.Context) error {
 }
 
 // needsProtocolHandshake returns true if control protocol handshake is required.
+// Handshake is needed whenever a feature relies on the control channel
+// (hooks, permission callbacks, checkpointing, SDK MCP servers, agents).
+// Methods like GetMcpStatus lazy-init on demand so they work even when no
+// control-channel feature is configured up front.
 func (t *Transport) needsProtocolHandshake() bool {
 	if t.options == nil {
 		return false
@@ -229,7 +233,23 @@ func (t *Transport) needsProtocolHandshake() bool {
 	return t.options.Hooks != nil ||
 		t.options.CanUseTool != nil ||
 		t.options.EnableFileCheckpointing ||
-		t.hasSdkMcpServers()
+		t.hasSdkMcpServers() ||
+		len(t.options.Agents) > 0
+}
+
+// ensureProtocolInitialized performs the control protocol handshake lazily
+// when called, so callers that need the control channel on demand
+// (e.g. GetMcpStatus) work even when no up-front feature requested init.
+// Only valid in streaming mode; one-shot transports never initialize.
+func (t *Transport) ensureProtocolInitialized(ctx context.Context) error {
+	if t.closeStdin {
+		return fmt.Errorf("control protocol not available in one-shot mode")
+	}
+	if t.protocol == nil {
+		return fmt.Errorf("control protocol not started")
+	}
+	_, err := t.protocol.Initialize(ctx)
+	return err
 }
 
 // SendMessage sends a message to the CLI subprocess.

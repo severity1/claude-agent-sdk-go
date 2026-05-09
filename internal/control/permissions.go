@@ -22,10 +22,19 @@ func (p *Protocol) handleCanUseToolRequest(ctx context.Context, requestID string
 		input = make(map[string]any)
 	}
 
-	// Parse suggestions from context
+	// Parse context fields from request. tool_use_id and agent_id are
+	// populated by the CLI on every can_use_tool request (Python PR #754);
+	// forwarding them lets callbacks distinguish concurrent tool calls and
+	// attribute requests to the originating subagent.
 	var permCtx ToolPermissionContext
 	if suggestions, ok := request["permission_suggestions"].([]any); ok {
 		permCtx.Suggestions = parsePermissionSuggestions(suggestions)
+	}
+	if s, ok := request["tool_use_id"].(string); ok && s != "" {
+		permCtx.ToolUseID = &s
+	}
+	if s, ok := request["agent_id"].(string); ok && s != "" {
+		permCtx.AgentID = &s
 	}
 
 	// Get callback (thread-safe read)
@@ -58,26 +67,14 @@ func (p *Protocol) handleCanUseToolRequest(ctx context.Context, requestID string
 }
 
 // sendPermissionResponse sends a permission result back to CLI.
+//
+// The PermissionResult is marshaled directly so that
+// PermissionResultAllow/Deny.MarshalJSON runs and hard-codes the
+// "behavior" discriminator on the wire regardless of struct state.
 func (p *Protocol) sendPermissionResponse(ctx context.Context, requestID string, result PermissionResult) error {
-	// Build response based on result type
-	var responseData map[string]any
-	switch r := result.(type) {
-	case PermissionResultAllow:
-		responseData = map[string]any{"behavior": "allow"}
-		if r.UpdatedInput != nil {
-			responseData["updatedInput"] = r.UpdatedInput
-		}
-		if len(r.UpdatedPermissions) > 0 {
-			responseData["updatedPermissions"] = r.UpdatedPermissions
-		}
-	case PermissionResultDeny:
-		responseData = map[string]any{"behavior": "deny"}
-		if r.Message != "" {
-			responseData["message"] = r.Message
-		}
-		if r.Interrupt {
-			responseData["interrupt"] = r.Interrupt
-		}
+	switch result.(type) {
+	case PermissionResultAllow, PermissionResultDeny:
+		// OK - handled by MarshalJSON.
 	default:
 		return fmt.Errorf("unknown permission result type: %T", result)
 	}
@@ -87,7 +84,7 @@ func (p *Protocol) sendPermissionResponse(ctx context.Context, requestID string,
 		Response: Response{
 			Subtype:   ResponseSubtypeSuccess,
 			RequestID: requestID,
-			Response:  responseData,
+			Response:  result,
 		},
 	}
 

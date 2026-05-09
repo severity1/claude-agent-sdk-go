@@ -8,6 +8,7 @@ GOMOD=$(GOCMD) mod
 GOFMT=gofmt
 GOLINT=golangci-lint
 GOCYCLO=gocyclo
+GODEADCODE=deadcode
 
 # Complexity threshold (functions over this are flagged)
 CYCLO_THRESHOLD=15
@@ -17,7 +18,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-.PHONY: all test test-verbose test-race test-cover clean deps fmt lint vet cyclo cyclo-check check examples help
+.PHONY: all test test-verbose test-race test-cover clean deps fmt lint vet cyclo cyclo-check deadcode deadcode-check check examples help
 
 all: test
 
@@ -68,10 +69,12 @@ deps-verify: ## Verify dependencies
 fmt: ## Format code
 	$(GOFMT) -s -w .
 
-fmt-check: ## Check if code is formatted
-	@if [ "$$($(GOFMT) -s -l . | wc -l)" -gt 0 ]; then \
+fmt-check: ## Check if code is formatted (scans tracked .go files only)
+	@files="$$(git ls-files '*.go' 2>/dev/null || find . -name '*.go' -not -path './.claude/worktrees/*')"; \
+	bad="$$(echo "$$files" | xargs $(GOFMT) -s -l 2>/dev/null)"; \
+	if [ -n "$$bad" ]; then \
 		echo "The following files are not formatted with gofmt:"; \
-		$(GOFMT) -s -l .; \
+		echo "$$bad"; \
 		exit 1; \
 	fi
 
@@ -90,7 +93,30 @@ cyclo-check: ## Fail if complexity exceeds threshold (CI use)
 	@$(GOCMD) install github.com/fzipp/gocyclo/cmd/gocyclo@latest 2>/dev/null || true
 	@$(GOCYCLO) -over $(CYCLO_THRESHOLD) -avg .
 
-check: fmt-check vet lint cyclo fuzz-test ## Run all checks (includes fuzz corpus)
+# Deadcode scope: examples are the SDK's only main entrypoints; internal tests
+# also serve as roots (-test=true) so test-only helpers count as reachable.
+# Filter narrows findings to internal/* — the root claudecode package's public
+# API is reachable by external consumers, not us, and would always be flagged.
+DEADCODE_ROOTS=./examples/... ./internal/...
+DEADCODE_FILTER=github.com/severity1/claude-agent-sdk-go/internal/...
+
+deadcode: ## Report unreachable functions in internal/* (golang.org/x/tools/cmd/deadcode)
+	@$(GOCMD) install golang.org/x/tools/cmd/deadcode@latest 2>/dev/null || true
+	@echo "Unreachable internal functions (rooted at examples + internal tests):"
+	@$(GODEADCODE) -test=true -filter='$(DEADCODE_FILTER)' $(DEADCODE_ROOTS) || true
+
+deadcode-check: ## Fail if unreachable internal functions exist (CI use)
+	@$(GOCMD) install golang.org/x/tools/cmd/deadcode@latest 2>/dev/null || true
+	@out="$$($(GODEADCODE) -test=true -filter='$(DEADCODE_FILTER)' $(DEADCODE_ROOTS))"; \
+	if [ -n "$$out" ]; then \
+		echo "Unreachable internal functions detected:"; \
+		echo "$$out"; \
+		echo ""; \
+		echo "Either remove them or, if intentionally reserved, exercise via examples/tests."; \
+		exit 1; \
+	fi
+
+check: fmt-check vet lint cyclo deadcode fuzz-test ## Run all checks (includes fuzz corpus)
 
 ## Security
 security: ## Run security checks
@@ -173,7 +199,7 @@ release-dry: ## Dry run release
 	goreleaser release --snapshot --clean --skip-publish
 
 ## CI/CD helpers
-ci: deps-verify test-race check examples sdk-test fuzz-test ## Run CI pipeline locally (includes fuzz)
+ci: deps-verify test-race check examples sdk-test deadcode-check ## Run CI pipeline locally (fuzz + deadcode covered by check)
 
 ci-coverage: ## Run CI with coverage
 	$(GOTEST) -race -coverprofile=coverage.out ./...

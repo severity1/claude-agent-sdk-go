@@ -20,6 +20,35 @@ const (
 	testModelName    = "claude-sonnet-4-5"
 )
 
+// TestEnsureProtocolInitialized_OneShotRejected verifies the lazy-init path
+// refuses to run in one-shot mode. This guards GetMcpStatus (and any future
+// on-demand control-protocol method) from attempting a handshake against a
+// subprocess whose stdin has already been closed.
+func TestEnsureProtocolInitialized_OneShotRejected(t *testing.T) {
+	tr := &Transport{closeStdin: true}
+	err := tr.ensureProtocolInitialized(context.Background())
+	if err == nil {
+		t.Fatal("expected error for one-shot mode, got nil")
+	}
+	if !strings.Contains(err.Error(), "one-shot") {
+		t.Errorf("error should mention one-shot mode, got: %v", err)
+	}
+}
+
+// TestEnsureProtocolInitialized_NoProtocolStarted verifies lazy-init returns
+// a clear error rather than panicking when the protocol struct is nil
+// (e.g. called before Connect).
+func TestEnsureProtocolInitialized_NoProtocolStarted(t *testing.T) {
+	tr := &Transport{closeStdin: false, protocol: nil}
+	err := tr.ensureProtocolInitialized(context.Background())
+	if err == nil {
+		t.Fatal("expected error when protocol is nil, got nil")
+	}
+	if !strings.Contains(err.Error(), "not started") {
+		t.Errorf("error should mention protocol not started, got: %v", err)
+	}
+}
+
 // TestTransportLifecycle tests connection lifecycle, state management, and reconnection
 func TestTransportLifecycle(t *testing.T) {
 	ctx, cancel := setupTransportTestContext(t, 10*time.Second)
@@ -844,6 +873,39 @@ func TestTransportControlMessageRouting(t *testing.T) {
 			return
 		}
 	}
+}
+
+// TestGetMcpStatus_LazyInitSuccessPath exercises the success path through
+// ensureProtocolInitialized -> protocol.Initialize -> protocol.GetMcpStatus
+// using the control-protocol mock CLI. Existing tests cover the two rejected
+// paths (one-shot mode, nil protocol); this test covers the handshake-succeeds
+// branch so a regression that breaks lazy-init for streaming-mode clients is
+// caught here rather than leaking into the public Client.GetMcpStatus surface.
+func TestGetMcpStatus_LazyInitSuccessPath(t *testing.T) {
+	if runtime.GOOS == windowsOS {
+		t.Skip("Skipped on Windows: batch script cannot properly handle control protocol")
+	}
+
+	ctx, cancel := setupTransportTestContext(t, 10*time.Second)
+	defer cancel()
+
+	transport := setupTransportForTest(t, newTransportMockCLIWithControlProtocol())
+	defer disconnectTransportSafely(t, transport)
+
+	connectTransportSafely(ctx, t, transport)
+
+	resp, err := transport.GetMcpStatus(ctx)
+	if err != nil {
+		t.Fatalf("GetMcpStatus: unexpected error: %v", err)
+		return
+	}
+	if resp == nil {
+		t.Fatal("GetMcpStatus: response should not be nil on success")
+		return
+	}
+	// Mock returns response:{} so McpServers is empty - that's the expected
+	// success shape; asserting non-nil confirms unmarshal happened and the
+	// lazy-init handshake did not block or error.
 }
 
 // newTransportMockCLIWithControlProtocol creates a mock CLI that supports control protocol.

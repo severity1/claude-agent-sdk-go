@@ -3,6 +3,7 @@ package claudecode
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 
@@ -36,13 +37,16 @@ type Client interface {
 	// Requires WithFileCheckpointing() or WithEnableFileCheckpointing(true) option.
 	// Only works in streaming mode (after Connect()).
 	RewindFiles(ctx context.Context, messageUUID string) error
+	// GetMcpStatus returns the current status of all connected MCP servers.
+	// Only works in streaming mode (after Connect()).
+	GetMcpStatus(ctx context.Context) (*McpStatusResponse, error)
 	GetStreamIssues() []StreamIssue
 	GetStreamStats() StreamStats
 	GetServerInfo(ctx context.Context) (map[string]interface{}, error)
 }
 
-// ClientImpl implements the Client interface.
-type ClientImpl struct {
+// clientImpl implements the Client interface.
+type clientImpl struct {
 	mu              sync.RWMutex
 	transport       Transport
 	customTransport Transport // For testing with WithTransport
@@ -50,21 +54,29 @@ type ClientImpl struct {
 	connected       bool
 	msgChan         <-chan Message
 	errChan         <-chan error
+	// streamErrChan forwards non-transport-origin errors (e.g. QueryStream
+	// send failures from the background goroutine) into the receive path so
+	// callers observing Receive* can act on them instead of silently losing
+	// messages when the outbound pipe breaks.
+	streamErrChan chan error
 }
 
 // NewClient creates a new Client with the given options.
 func NewClient(opts ...Option) Client {
 	options := NewOptions(opts...)
-	client := &ClientImpl{
+	client := &clientImpl{
 		options: options,
 	}
 	return client
 }
 
-// NewClientWithTransport creates a new Client with a custom transport (for testing).
+// NewClientWithTransport creates a new Client that uses the supplied Transport
+// instead of spawning the Claude CLI subprocess. Intended for tests and
+// integration scaffolding where the CLI must be mocked or replaced; production
+// callers should use [NewClient] or [WithClient].
 func NewClientWithTransport(transport Transport, opts ...Option) Client {
 	options := NewOptions(opts...)
-	return &ClientImpl{
+	return &clientImpl{
 		customTransport: transport,
 		options:         options,
 	}
@@ -127,11 +139,10 @@ func WithClient(ctx context.Context, fn func(Client) error, opts ...Option) erro
 
 	defer func() {
 		// Following Go idiom: cleanup errors don't override the original error
-		// This matches patterns in database/sql, os.File, and other stdlib packages
+		// from fn, but log them so crash diagnostics surface in the caller's
+		// logs instead of vanishing.
 		if disconnectErr := client.Disconnect(); disconnectErr != nil {
-			// Log cleanup errors but don't return them to preserve the original error
-			// This follows the standard Go pattern for resource cleanup
-			_ = disconnectErr // Explicitly acknowledge we're ignoring this error
+			log.Printf("claude-sdk: WithClient disconnect error: %v", disconnectErr)
 		}
 	}()
 
@@ -169,9 +180,9 @@ func WithClientTransport(ctx context.Context, transport Transport, fn func(Clien
 
 	defer func() {
 		// Following Go idiom: cleanup errors don't override the original error
+		// from fn, but log them so broken-transport diagnostics aren't lost.
 		if disconnectErr := client.Disconnect(); disconnectErr != nil {
-			// Log cleanup errors but don't return them to preserve the original error
-			_ = disconnectErr // Explicitly acknowledge we're ignoring this error
+			log.Printf("claude-sdk: WithClientTransport disconnect error: %v", disconnectErr)
 		}
 	}()
 
@@ -179,7 +190,7 @@ func WithClientTransport(ctx context.Context, transport Transport, fn func(Clien
 }
 
 // validateOptions validates the client configuration options
-func (c *ClientImpl) validateOptions() error {
+func (c *clientImpl) validateOptions() error {
 	if c.options == nil {
 		return nil // Nil options are acceptable (use defaults)
 	}
@@ -221,7 +232,7 @@ func (c *ClientImpl) validateOptions() error {
 }
 
 // Connect establishes a connection to the Claude Code CLI.
-func (c *ClientImpl) Connect(ctx context.Context, _ ...StreamMessage) error {
+func (c *clientImpl) Connect(ctx context.Context, _ ...StreamMessage) error {
 	// Check context before acquiring lock
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -262,12 +273,16 @@ func (c *ClientImpl) Connect(ctx context.Context, _ ...StreamMessage) error {
 	// Get message channels
 	c.msgChan, c.errChan = c.transport.ReceiveMessages(ctx)
 
+	// Buffered so QueryStream's goroutine can surface a send error without
+	// blocking even when nothing is currently reading from the iterator.
+	c.streamErrChan = make(chan error, 4)
+
 	c.connected = true
 	return nil
 }
 
 // Disconnect closes the connection to the Claude Code CLI.
-func (c *ClientImpl) Disconnect() error {
+func (c *clientImpl) Disconnect() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -280,6 +295,10 @@ func (c *ClientImpl) Disconnect() error {
 	c.transport = nil
 	c.msgChan = nil
 	c.errChan = nil
+	if c.streamErrChan != nil {
+		close(c.streamErrChan)
+		c.streamErrChan = nil
+	}
 	return nil
 }
 
@@ -289,7 +308,7 @@ func (c *ClientImpl) Disconnect() error {
 // Example:
 //
 //	client.Query(ctx, "What is Go?")
-func (c *ClientImpl) Query(ctx context.Context, prompt string) error {
+func (c *clientImpl) Query(ctx context.Context, prompt string) error {
 	return c.queryWithSession(ctx, prompt, defaultSessionID)
 }
 
@@ -304,7 +323,7 @@ func (c *ClientImpl) Query(ctx context.Context, prompt string) error {
 //	client.QueryWithSession(ctx, "Remember this", "my-session")
 //	client.QueryWithSession(ctx, "What did I just say?", "my-session") // Remembers context
 //	client.Query(ctx, "What did I just say?")                          // Won't remember, different session
-func (c *ClientImpl) QueryWithSession(ctx context.Context, prompt string, sessionID string) error {
+func (c *clientImpl) QueryWithSession(ctx context.Context, prompt string, sessionID string) error {
 	// Use default session if empty session ID provided
 	if sessionID == "" {
 		sessionID = defaultSessionID
@@ -313,7 +332,7 @@ func (c *ClientImpl) QueryWithSession(ctx context.Context, prompt string, sessio
 }
 
 // queryWithSession is the internal implementation for sending queries with session management.
-func (c *ClientImpl) queryWithSession(ctx context.Context, prompt string, sessionID string) error {
+func (c *clientImpl) queryWithSession(ctx context.Context, prompt string, sessionID string) error {
 	// Check context before proceeding
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -350,7 +369,7 @@ func (c *ClientImpl) queryWithSession(ctx context.Context, prompt string, sessio
 }
 
 // QueryStream sends a stream of messages.
-func (c *ClientImpl) QueryStream(ctx context.Context, messages <-chan StreamMessage) error {
+func (c *clientImpl) QueryStream(ctx context.Context, messages <-chan StreamMessage) error {
 	// Check connection status with read lock
 	c.mu.RLock()
 	connected := c.connected
@@ -361,6 +380,12 @@ func (c *ClientImpl) QueryStream(ctx context.Context, messages <-chan StreamMess
 		return fmt.Errorf("client not connected")
 	}
 
+	// Capture the error channel so the goroutine can forward send failures
+	// without re-acquiring the lock after the caller may have Disconnected.
+	c.mu.RLock()
+	streamErrChan := c.streamErrChan
+	c.mu.RUnlock()
+
 	// Send messages from channel in a goroutine
 	go func() {
 		for {
@@ -370,7 +395,19 @@ func (c *ClientImpl) QueryStream(ctx context.Context, messages <-chan StreamMess
 					return // Channel closed
 				}
 				if err := transport.SendMessage(ctx, msg); err != nil {
-					// Log error but continue processing
+					// Streaming sends have no caller-visible return path on
+					// QueryStream itself, so forward the error into the
+					// receive-side channel so a caller blocked on Receive*
+					// sees the broken pipe. Log as well for cases where no
+					// receiver is active. Non-blocking send prevents hanging
+					// the goroutine if the buffer is already full.
+					log.Printf("claude-sdk: QueryStream SendMessage failed: %v", err)
+					if streamErrChan != nil {
+						select {
+						case streamErrChan <- err:
+						default:
+						}
+					}
 					return
 				}
 			case <-ctx.Done():
@@ -383,7 +420,7 @@ func (c *ClientImpl) QueryStream(ctx context.Context, messages <-chan StreamMess
 }
 
 // ReceiveMessages returns a channel of incoming messages.
-func (c *ClientImpl) ReceiveMessages(_ context.Context) <-chan Message {
+func (c *clientImpl) ReceiveMessages(_ context.Context) <-chan Message {
 	// Check connection status with read lock
 	c.mu.RLock()
 	connected := c.connected
@@ -402,12 +439,13 @@ func (c *ClientImpl) ReceiveMessages(_ context.Context) <-chan Message {
 }
 
 // ReceiveResponse returns an iterator for the response messages.
-func (c *ClientImpl) ReceiveResponse(_ context.Context) MessageIterator {
+func (c *clientImpl) ReceiveResponse(_ context.Context) MessageIterator {
 	// Check connection status with read lock
 	c.mu.RLock()
 	connected := c.connected
 	msgChan := c.msgChan
 	errChan := c.errChan
+	streamErrChan := c.streamErrChan
 	c.mu.RUnlock()
 
 	if !connected || msgChan == nil {
@@ -416,13 +454,14 @@ func (c *ClientImpl) ReceiveResponse(_ context.Context) MessageIterator {
 
 	// Create a simple iterator over the message channel
 	return &clientIterator{
-		msgChan: msgChan,
-		errChan: errChan,
+		msgChan:       msgChan,
+		errChan:       errChan,
+		streamErrChan: streamErrChan,
 	}
 }
 
 // Interrupt sends an interrupt signal to stop the current operation.
-func (c *ClientImpl) Interrupt(ctx context.Context) error {
+func (c *clientImpl) Interrupt(ctx context.Context) error {
 	// Check context before proceeding
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -453,7 +492,7 @@ func (c *ClientImpl) Interrupt(ctx context.Context) error {
 // Example - Reset to default model:
 //
 //	err := client.SetModel(ctx, nil)
-func (c *ClientImpl) SetModel(ctx context.Context, model *string) error {
+func (c *clientImpl) SetModel(ctx context.Context, model *string) error {
 	// Check context before proceeding (Go idiom: fail fast)
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -484,7 +523,7 @@ func (c *ClientImpl) SetModel(ctx context.Context, model *string) error {
 // Example - Switch to plan mode:
 //
 //	err := client.SetPermissionMode(ctx, claudecode.PermissionModePlan)
-func (c *ClientImpl) SetPermissionMode(ctx context.Context, mode PermissionMode) error {
+func (c *clientImpl) SetPermissionMode(ctx context.Context, mode PermissionMode) error {
 	// Check context before proceeding (Go idiom: fail fast)
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -515,7 +554,7 @@ func (c *ClientImpl) SetPermissionMode(ctx context.Context, mode PermissionMode)
 //	if msg, ok := receivedMsg.(*claudecode.UserMessage); ok && msg.UUID != nil {
 //	    err := client.RewindFiles(ctx, *msg.UUID)
 //	}
-func (c *ClientImpl) RewindFiles(ctx context.Context, messageUUID string) error {
+func (c *clientImpl) RewindFiles(ctx context.Context, messageUUID string) error {
 	// Check context before proceeding (Go idiom: fail fast)
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -534,42 +573,81 @@ func (c *ClientImpl) RewindFiles(ctx context.Context, messageUUID string) error 
 	return transport.RewindFiles(ctx, messageUUID)
 }
 
-// clientIterator implements MessageIterator for client message reception
+// GetMcpStatus returns the current status of all connected MCP servers.
+// Returns error if not connected or if the control request fails.
+func (c *clientImpl) GetMcpStatus(ctx context.Context) (*McpStatusResponse, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	c.mu.RLock()
+	connected := c.connected
+	transport := c.transport
+	c.mu.RUnlock()
+
+	if !connected || transport == nil {
+		return nil, fmt.Errorf("client not connected")
+	}
+
+	return transport.GetMcpStatus(ctx)
+}
+
+// clientIterator implements MessageIterator for client message reception.
+// closed is guarded by mu since Next/Close may be called from concurrent goroutines.
 type clientIterator struct {
-	msgChan <-chan Message
-	errChan <-chan error
-	closed  bool
+	msgChan       <-chan Message
+	errChan       <-chan error
+	streamErrChan <-chan error
+	mu            sync.Mutex
+	closed        bool
+}
+
+func (ci *clientIterator) markClosed() {
+	ci.mu.Lock()
+	ci.closed = true
+	ci.mu.Unlock()
+}
+
+func (ci *clientIterator) isClosed() bool {
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	return ci.closed
 }
 
 func (ci *clientIterator) Next(ctx context.Context) (Message, error) {
-	if ci.closed {
+	if ci.isClosed() {
 		return nil, ErrNoMoreMessages
 	}
 
 	select {
 	case msg, ok := <-ci.msgChan:
 		if !ok {
-			ci.closed = true
+			ci.markClosed()
 			return nil, ErrNoMoreMessages
 		}
 		return msg, nil
 	case err := <-ci.errChan:
-		ci.closed = true
+		ci.markClosed()
+		return nil, err
+	case err := <-ci.streamErrChan:
+		// Send-side failure from QueryStream goroutine. Surface the same
+		// way as transport errChan so callers see the broken pipe.
+		ci.markClosed()
 		return nil, err
 	case <-ctx.Done():
-		ci.closed = true
+		ci.markClosed()
 		return nil, ctx.Err()
 	}
 }
 
 func (ci *clientIterator) Close() error {
-	ci.closed = true
+	ci.markClosed()
 	return nil
 }
 
 // GetStreamIssues returns validation issues found in the message stream.
 // This can help diagnose problems like missing tool results or incomplete streams.
-func (c *ClientImpl) GetStreamIssues() []StreamIssue {
+func (c *clientImpl) GetStreamIssues() []StreamIssue {
 	c.mu.RLock()
 	transport := c.transport
 	c.mu.RUnlock()
@@ -588,7 +666,7 @@ func (c *ClientImpl) GetStreamIssues() []StreamIssue {
 
 // GetStreamStats returns statistics about the message stream.
 // This includes counts of tools requested/received and pending tools.
-func (c *ClientImpl) GetStreamStats() StreamStats {
+func (c *clientImpl) GetStreamStats() StreamStats {
 	c.mu.RLock()
 	transport := c.transport
 	c.mu.RUnlock()
@@ -625,7 +703,7 @@ func (c *ClientImpl) GetStreamStats() StreamStats {
 //	}
 //	fmt.Printf("Connected: %v, Transport: %s\n",
 //	    info["connected"], info["transport_type"])
-func (c *ClientImpl) GetServerInfo(_ context.Context) (map[string]interface{}, error) {
+func (c *clientImpl) GetServerInfo(_ context.Context) (map[string]interface{}, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 

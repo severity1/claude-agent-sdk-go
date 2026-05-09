@@ -3,6 +3,7 @@ package subprocess
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -67,8 +68,12 @@ func (t *Transport) handleStdout() {
 				// Route control messages to the protocol for request/response correlation
 				if t.protocol != nil {
 					// HandleIncomingMessage routes control responses to pending requests
-					// and forwards non-control messages to the protocol's message stream
-					_ = t.protocol.HandleIncomingMessage(t.ctx, rawCtrl.Data)
+					// and forwards non-control messages to the protocol's message stream.
+					// Routing failures mean a pending request will never get its
+					// response; log so the eventual SendControlRequest timeout has context.
+					if err := t.protocol.HandleIncomingMessage(t.ctx, rawCtrl.Data); err != nil {
+						log.Printf("claude-sdk: subprocess: failed to route control message: %v", err)
+					}
 				}
 				// Don't send control messages to msgChan - they're internal to the protocol
 				continue
@@ -136,6 +141,8 @@ func (t *Transport) routeInitError(msg shared.Message) {
 	if !ok || t.connected || !resultMsg.IsError || t.protocol == nil {
 		return
 	}
+	// formatInitError returns a freshly-built diagnostic string; there is no
+	// underlying error to wrap with %w, so %s is the right verb here.
 	t.protocol.HandleControlInitErr(fmt.Errorf("%s", formatInitError(resultMsg)))
 }
 

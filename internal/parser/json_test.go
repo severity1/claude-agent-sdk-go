@@ -153,15 +153,15 @@ func TestParseValidMessages(t *testing.T) {
 				}
 			},
 		},
-		// Issue #23: AssistantMessage error field tests
+		// Issue #23: AssistantMessage error field tests (error is at top-level, not in messageData)
 		{
 			name: "assistant_message_with_rate_limit_error",
 			data: map[string]any{
-				"type": "assistant",
+				"type":  "assistant",
+				"error": map[string]any{"type": "rate_limit", "message": "too many requests"},
 				"message": map[string]any{
 					"content": []any{map[string]any{"type": "text", "text": "Rate limited"}},
 					"model":   "claude-3-sonnet",
-					"error":   "rate_limit",
 				},
 			},
 			expectedType: shared.MessageTypeAssistant,
@@ -182,11 +182,11 @@ func TestParseValidMessages(t *testing.T) {
 		{
 			name: "assistant_message_with_auth_error",
 			data: map[string]any{
-				"type": "assistant",
+				"type":  "assistant",
+				"error": map[string]any{"type": "authentication_failed", "message": "auth failed"},
 				"message": map[string]any{
 					"content": []any{map[string]any{"type": "text", "text": "Auth failed"}},
 					"model":   "claude-3-sonnet",
-					"error":   "authentication_failed",
 				},
 			},
 			expectedType: shared.MessageTypeAssistant,
@@ -406,11 +406,8 @@ func TestParseErrors(t *testing.T) {
 			data:        map[string]any{"message": map[string]any{"content": "test"}},
 			expectError: "missing or invalid type field",
 		},
-		{
-			name:        "unknown_message_type",
-			data:        map[string]any{"type": "unknown_type", "content": "test"},
-			expectError: "unknown message type: unknown_type",
-		},
+		// Note: unknown message types no longer return errors - they return RawMessage.
+		// See TestParseMessage_UnknownType_ReturnsRawMessage for that behavior.
 		{
 			name:        "user_message_missing_message_field",
 			data:        map[string]any{"type": "user"},
@@ -707,15 +704,15 @@ func TestParseMessages(t *testing.T) {
 	assertNoParseError(t, err)
 	assertMessageCount(t, messages, 2)
 
-	// Test error handling
+	// Test error handling - missing type field causes a parse error
 	errorLines := []string{
 		`{"type": "user", "message": {"content": "Valid"}}`,
-		`{"type": "invalid"}`, // This should cause an error
+		`{"no_type_field": true}`, // This should cause an error (missing type)
 	}
 
 	_, err = ParseMessages(errorLines)
 	if err == nil {
-		t.Error("Expected error for invalid message type")
+		t.Error("Expected error for missing type field")
 	}
 	if !strings.Contains(err.Error(), "error parsing line 1") {
 		t.Errorf("Expected line number in error, got: %v", err)
@@ -783,7 +780,7 @@ func TestParseErrorConditions(t *testing.T) {
 				"type": "assistant",
 				"message": map[string]any{
 					"content": []any{
-						map[string]any{"type": "unknown_block"},
+						"not_an_object", // non-object block triggers parse error
 					},
 					"model": "claude-3",
 				},
@@ -979,11 +976,8 @@ func TestContentBlockErrorConditions(t *testing.T) {
 			blockData:   map[string]any{"type": 123},
 			expectError: "content block missing type field",
 		},
-		{
-			name:        "unknown_block_type",
-			blockData:   map[string]any{"type": "unknown_type"},
-			expectError: "unknown content block type: unknown_type",
-		},
+		// Note: unknown content block types no longer return errors - they return RawContentBlock.
+		// See TestParseContentBlock_UnknownType_ReturnsRawContentBlock for that behavior.
 		{
 			name:        "text_block_missing_text",
 			blockData:   map[string]any{"type": "text"},
@@ -1092,8 +1086,8 @@ func TestContentBlockOptionalFields(t *testing.T) {
 func TestProcessLineEdgeCases(t *testing.T) {
 	parser := setupParserTest(t)
 
-	// Test line with content block parse error
-	invalidBlockLine := `{"type": "user", "message": {"content": [{"type": "unknown_block"}]}}`
+	// Test line with content block parse error - non-object block triggers error
+	invalidBlockLine := `{"type": "user", "message": {"content": ["not_an_object"]}}`
 	messages, err := parser.ProcessLine(invalidBlockLine)
 	if err == nil {
 		t.Error("Expected error for invalid content block")
@@ -1102,11 +1096,11 @@ func TestProcessLineEdgeCases(t *testing.T) {
 		t.Errorf("Expected no messages on error, got %d", len(messages))
 	}
 
-	// Test multiple lines with one having an error
-	mixedLine := `{"type": "system", "subtype": "ok"}` + "\n" + `{"type": "invalid"}`
+	// Test multiple lines with one having an error - missing type field triggers error
+	mixedLine := `{"type": "system", "subtype": "ok"}` + "\n" + `{"no_type": "missing"}`
 	messages2, err2 := parser.ProcessLine(mixedLine)
 	if err2 == nil {
-		t.Error("Expected error for second invalid message")
+		t.Error("Expected error for missing type field")
 	}
 	// Should return the first valid message before error
 	if len(messages2) != 1 {
@@ -1880,4 +1874,173 @@ func TestResultMessageErrorsField(t *testing.T) {
 			t.Errorf("unexpected error: %s", resultMsg.Errors[0])
 		}
 	})
+}
+
+// TestParseAssistantMessage_ErrorField tests that the error field is read from the
+// top-level JSON object, not from the nested message object (Python PR #506 parity).
+func TestParseAssistantMessage_ErrorField(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantError *shared.AssistantMessageError
+	}{
+		{
+			name:      "rate_limit error as object",
+			input:     `{"type":"assistant","error":{"type":"rate_limit","message":"too many requests"},"message":{"content":[],"model":"claude-test","role":"assistant"}}`,
+			wantError: assistantErrPtr(shared.AssistantMessageErrorRateLimit),
+		},
+		{
+			name:      "billing_error as object",
+			input:     `{"type":"assistant","error":{"type":"billing_error","message":"billing issue"},"message":{"content":[],"model":"claude-test","role":"assistant"}}`,
+			wantError: assistantErrPtr(shared.AssistantMessageErrorBilling),
+		},
+		{
+			name:      "server_error as object",
+			input:     `{"type":"assistant","error":{"type":"server_error","message":"internal error"},"message":{"content":[],"model":"claude-test","role":"assistant"}}`,
+			wantError: assistantErrPtr(shared.AssistantMessageErrorServer),
+		},
+		{
+			name:      "authentication_failed as object",
+			input:     `{"type":"assistant","error":{"type":"authentication_failed","message":"auth expired"},"message":{"content":[],"model":"claude-test","role":"assistant"}}`,
+			wantError: assistantErrPtr(shared.AssistantMessageErrorAuthFailed),
+		},
+		{
+			name:      "no error",
+			input:     `{"type":"assistant","message":{"content":[],"model":"claude-test","role":"assistant"}}`,
+			wantError: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := New()
+			msgs, err := p.ProcessLine(tc.input)
+			if err != nil {
+				t.Fatalf("expected no error, got: %v", err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("expected 1 message, got %d", len(msgs))
+			}
+			am, ok := msgs[0].(*shared.AssistantMessage)
+			if !ok {
+				t.Fatalf("expected *shared.AssistantMessage, got %T", msgs[0])
+			}
+			if tc.wantError == nil {
+				if am.Error != nil {
+					t.Errorf("expected Error nil, got %v", *am.Error)
+				}
+				return
+			}
+			if am.Error == nil {
+				t.Fatalf("expected Error %v, got nil", *tc.wantError)
+			}
+			if *am.Error != *tc.wantError {
+				t.Errorf("expected Error %v, got %v", *tc.wantError, *am.Error)
+			}
+		})
+	}
+}
+
+// TestParseMessage_UnknownType_ReturnsRawMessage tests that unrecognized message types
+// return a *shared.RawMessage instead of an error (Python PR #598 parity).
+func TestParseMessage_UnknownType_ReturnsRawMessage(t *testing.T) {
+	p := New()
+	data := map[string]any{
+		"type":          "future_message_type",
+		"some_field":    "some_value",
+		"another_field": 42.0,
+	}
+	msg, err := p.ParseMessage(data)
+	if err != nil {
+		t.Fatalf("expected no error for unknown type, got: %v", err)
+	}
+	rawMsg, ok := msg.(*shared.RawMessage)
+	if !ok {
+		t.Fatalf("expected *shared.RawMessage, got %T", msg)
+		return
+	}
+	if rawMsg.Type() != "future_message_type" {
+		t.Errorf("expected type 'future_message_type', got %q", rawMsg.Type())
+	}
+	if rawMsg.Data["some_field"] != "some_value" {
+		t.Errorf("expected some_field 'some_value', got %v", rawMsg.Data["some_field"])
+	}
+}
+
+// TestParseContentBlock_UnknownType_ReturnsRawContentBlock tests that unrecognized content
+// block types return a *shared.RawContentBlock instead of an error (Python PR #598 parity).
+func TestParseContentBlock_UnknownType_ReturnsRawContentBlock(t *testing.T) {
+	p := New()
+	// Trigger via an assistant message containing an unknown content block type.
+	data := map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"content": []any{
+				map[string]any{
+					"type":        "future_block_type",
+					"custom_data": "hello",
+				},
+			},
+			"model": "claude-test",
+			"role":  "assistant",
+		},
+	}
+	msg, err := p.ParseMessage(data)
+	if err != nil {
+		t.Fatalf("expected no error for unknown content block type, got: %v", err)
+	}
+	am, ok := msg.(*shared.AssistantMessage)
+	if !ok {
+		t.Fatalf("expected *shared.AssistantMessage, got %T", msg)
+		return
+	}
+	if len(am.Content) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(am.Content))
+	}
+	rawBlock, ok := am.Content[0].(*shared.RawContentBlock)
+	if !ok {
+		t.Fatalf("expected *shared.RawContentBlock, got %T", am.Content[0])
+		return
+	}
+	if rawBlock.BlockType() != "future_block_type" {
+		t.Errorf("expected block type 'future_block_type', got %q", rawBlock.BlockType())
+	}
+	if rawBlock.Data["custom_data"] != "hello" {
+		t.Errorf("expected custom_data 'hello', got %v", rawBlock.Data["custom_data"])
+	}
+}
+
+// TestParseAssistantMessage_ErrorObjectWithoutType verifies that an error
+// object lacking a "type" discriminator parses to AssistantMessageErrorUnknown,
+// not a raw JSON blob. Raw blobs would never match the typed constants that
+// helpers like IsRateLimited() compare against, defeating the typed-error API.
+func TestParseAssistantMessage_ErrorObjectWithoutType(t *testing.T) {
+	p := New()
+	input := `{"type":"assistant","error":{"message":"rate limited","code":429},"message":{"content":[],"model":"claude-test","role":"assistant"}}`
+
+	msgs, err := p.ProcessLine(input)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	am, ok := msgs[0].(*shared.AssistantMessage)
+	if !ok {
+		t.Fatalf("expected *shared.AssistantMessage, got %T", msgs[0])
+		return
+	}
+	if am.Error == nil {
+		t.Fatal("expected non-nil Error for object error without 'type', got nil")
+		return
+	}
+	if *am.Error != shared.AssistantMessageErrorUnknown {
+		t.Errorf("expected Error == AssistantMessageErrorUnknown (%q), got %q",
+			shared.AssistantMessageErrorUnknown, *am.Error)
+	}
+}
+
+// assistantErrPtr is a helper to create a pointer to an AssistantMessageError value.
+func assistantErrPtr(e shared.AssistantMessageError) *shared.AssistantMessageError {
+	return &e
 }

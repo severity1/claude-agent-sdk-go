@@ -99,7 +99,9 @@ func (t *Transport) cleanup() {
 	}
 
 	if t.mcpConfigFile != nil {
-		// Clean up temporary MCP config file
+		// Clean up temporary MCP config file. The file was already closed in
+		// generateMcpConfigFile (we retain the *os.File only for Name()/Remove);
+		// this Close() returns os.ErrClosed in the normal path and is benign.
 		_ = t.mcpConfigFile.Close()
 		_ = os.Remove(t.mcpConfigFile.Name()) // Ignore cleanup errors
 		t.mcpConfigFile = nil

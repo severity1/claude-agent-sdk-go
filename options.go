@@ -3,6 +3,7 @@ package claudecode
 import (
 	"context"
 	"io"
+	"log"
 	"os"
 
 	"github.com/severity1/claude-agent-sdk-go/internal/control"
@@ -56,6 +57,18 @@ type SdkPluginConfig = shared.SdkPluginConfig
 
 // OutputFormat specifies the format for structured output.
 type OutputFormat = shared.OutputFormat
+
+// ThinkingConfig configures the model's extended thinking behavior.
+type ThinkingConfig = shared.ThinkingConfig
+
+// ThinkingConfigAdaptive lets the model decide thinking budget adaptively.
+type ThinkingConfigAdaptive = shared.ThinkingConfigAdaptive
+
+// ThinkingConfigEnabled enables thinking with an explicit token budget.
+type ThinkingConfigEnabled = shared.ThinkingConfigEnabled
+
+// ThinkingConfigDisabled disables thinking explicitly.
+type ThinkingConfigDisabled = shared.ThinkingConfigDisabled
 
 // =============================================================================
 // Permission Callback Types (Issue #8)
@@ -207,9 +220,43 @@ func WithMaxBufferSize(size int) Option {
 }
 
 // WithMaxThinkingTokens sets the maximum thinking tokens.
+//
+// Deprecated: Use WithThinkingBudget instead for new code.
 func WithMaxThinkingTokens(tokens int) Option {
 	return func(o *Options) {
 		o.MaxThinkingTokens = tokens
+	}
+}
+
+// WithThinking sets the thinking configuration.
+// Use WithThinkingAdaptive(), WithThinkingBudget(), or WithThinkingDisabled() for convenience.
+func WithThinking(config ThinkingConfig) Option {
+	return func(o *Options) {
+		o.Thinking = config
+	}
+}
+
+// WithThinkingAdaptive enables adaptive thinking mode where the model decides its budget.
+func WithThinkingAdaptive() Option {
+	return WithThinking(ThinkingConfigAdaptive{})
+}
+
+// WithThinkingBudget enables thinking with an explicit token budget.
+// This replaces WithMaxThinkingTokens for new code.
+func WithThinkingBudget(tokens int) Option {
+	return WithThinking(ThinkingConfigEnabled{BudgetTokens: tokens})
+}
+
+// WithThinkingDisabled disables extended thinking explicitly.
+func WithThinkingDisabled() Option {
+	return WithThinking(ThinkingConfigDisabled{})
+}
+
+// WithEffort sets the model's reasoning effort level.
+// Valid values: "low", "medium", "high", "max".
+func WithEffort(effort string) Option {
+	return func(o *Options) {
+		o.Effort = &effort
 	}
 }
 
@@ -458,22 +505,6 @@ func WithAgent(name string, agent AgentDefinition) Option {
 	}
 }
 
-const customTransportMarker = "custom_transport"
-
-// WithTransport sets a custom transport for testing.
-// Since Transport is not part of Options struct, this is handled in client creation.
-func WithTransport(_ Transport) Option {
-	return func(o *Options) {
-		// This will be handled in client implementation
-		// For now, we'll use a special marker in ExtraArgs
-		if o.ExtraArgs == nil {
-			o.ExtraArgs = make(map[string]*string)
-		}
-		marker := customTransportMarker
-		o.ExtraArgs["__transport_marker__"] = &marker
-	}
-}
-
 // NewOptions creates Options with default values using functional options pattern.
 func NewOptions(opts ...Option) *Options {
 	// Create options with defaults from shared package
@@ -523,7 +554,7 @@ func WithStderrCallback(callback func(string)) Option {
 // OutputFormatJSONSchema creates an OutputFormat for JSON schema constraints.
 func OutputFormatJSONSchema(schema map[string]any) *OutputFormat {
 	return &OutputFormat{
-		Type:   "json_schema",
+		Type:   OutputFormatTypeJSONSchema,
 		Schema: schema,
 	}
 }
@@ -641,9 +672,14 @@ func WithCanUseTool(callback CanUseToolCallback) Option {
 			input map[string]any,
 			permCtx any,
 		) (any, error) {
-			// Convert permCtx back to strongly-typed ToolPermissionContext
+			// Convert permCtx back to strongly-typed ToolPermissionContext.
+			// If the cast fails it means a caller populated Options.CanUseTool
+			// with a non-standard wrapper (bypassing WithCanUseTool). Fall back
+			// to an empty context so the callback still runs, but log so the
+			// misuse is at least observable in practice.
 			tpc, ok := permCtx.(control.ToolPermissionContext)
 			if !ok {
+				log.Printf("claude-sdk: WithCanUseTool received permCtx of type %T; expected control.ToolPermissionContext - using empty context", permCtx)
 				tpc = control.ToolPermissionContext{}
 			}
 			return callback(ctx, toolName, input, tpc)
@@ -672,6 +708,14 @@ const (
 	HookEventSubagentStop = control.HookEventSubagentStop
 	// HookEventPreCompact is triggered before context compaction.
 	HookEventPreCompact = control.HookEventPreCompact
+	// HookEventPostToolUseFailure is triggered after a tool execution fails.
+	HookEventPostToolUseFailure = control.HookEventPostToolUseFailure
+	// HookEventNotification is triggered when a notification is sent.
+	HookEventNotification = control.HookEventNotification
+	// HookEventSubagentStart is triggered when a subagent starts.
+	HookEventSubagentStart = control.HookEventSubagentStart
+	// HookEventPermissionRequest is triggered when a permission request is made.
+	HookEventPermissionRequest = control.HookEventPermissionRequest
 )
 
 // HookCallback is the function signature for hook callbacks.
@@ -697,6 +741,8 @@ type (
 	PreToolUseHookInput = control.PreToolUseHookInput
 	// PostToolUseHookInput is the input for PostToolUse hook events.
 	PostToolUseHookInput = control.PostToolUseHookInput
+	// PostToolUseFailureHookInput is the input for PostToolUseFailure hook events.
+	PostToolUseFailureHookInput = control.PostToolUseFailureHookInput
 	// UserPromptSubmitHookInput is the input for UserPromptSubmit hook events.
 	UserPromptSubmitHookInput = control.UserPromptSubmitHookInput
 	// StopHookInput is the input for Stop hook events.
@@ -705,6 +751,12 @@ type (
 	SubagentStopHookInput = control.SubagentStopHookInput
 	// PreCompactHookInput is the input for PreCompact hook events.
 	PreCompactHookInput = control.PreCompactHookInput
+	// NotificationHookInput is the input for Notification hook events.
+	NotificationHookInput = control.NotificationHookInput
+	// SubagentStartHookInput is the input for SubagentStart hook events.
+	SubagentStartHookInput = control.SubagentStartHookInput
+	// PermissionRequestHookInput is the input for PermissionRequest hook events.
+	PermissionRequestHookInput = control.PermissionRequestHookInput
 )
 
 // PreToolUseHookSpecificOutput and related types contain hook-specific output fields.
@@ -713,8 +765,16 @@ type (
 	PreToolUseHookSpecificOutput = control.PreToolUseHookSpecificOutput
 	// PostToolUseHookSpecificOutput contains PostToolUse-specific output fields.
 	PostToolUseHookSpecificOutput = control.PostToolUseHookSpecificOutput
+	// PostToolUseFailureHookSpecificOutput contains PostToolUseFailure-specific output fields.
+	PostToolUseFailureHookSpecificOutput = control.PostToolUseFailureHookSpecificOutput
 	// UserPromptSubmitHookSpecificOutput contains UserPromptSubmit-specific output fields.
 	UserPromptSubmitHookSpecificOutput = control.UserPromptSubmitHookSpecificOutput
+	// NotificationHookSpecificOutput contains Notification-specific output fields.
+	NotificationHookSpecificOutput = control.NotificationHookSpecificOutput
+	// SubagentStartHookSpecificOutput contains SubagentStart-specific output fields.
+	SubagentStartHookSpecificOutput = control.SubagentStartHookSpecificOutput
+	// PermissionRequestHookSpecificOutput contains PermissionRequest-specific output fields.
+	PermissionRequestHookSpecificOutput = control.PermissionRequestHookSpecificOutput
 )
 
 // =============================================================================

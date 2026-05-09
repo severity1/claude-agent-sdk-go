@@ -88,7 +88,7 @@ func TestHookCallbackHandler_PreToolUse(t *testing.T) {
 		t.Fatalf("Expected *PreToolUseHookInput, got %T", receivedInput)
 	}
 
-	if preToolInput.ToolName != "Bash" {
+	if preToolInput.ToolName != "Bash" { //nolint:goconst // test value - no benefit from constant
 		t.Errorf("ToolName = %q, want %q", preToolInput.ToolName, "Bash")
 	}
 
@@ -584,7 +584,7 @@ func TestHookCallbackHandler_ThreadSafe(t *testing.T) {
 // Initialize with Hooks Tests
 // =============================================================================
 
-func TestGenerateHookRegistrations(t *testing.T) {
+func TestBuildHooksConfig_GeneratesCallbackIDs(t *testing.T) {
 	callback := func(
 		_ context.Context,
 		_ any,
@@ -607,24 +607,33 @@ func TestGenerateHookRegistrations(t *testing.T) {
 	transport := newHookMockTransport()
 	protocol := NewProtocol(transport, WithHooks(hooks))
 
-	registrations := protocol.generateHookRegistrations()
+	config := protocol.buildHooksConfig()
 
-	// Should generate registrations for all callbacks
-	// PreToolUse: 1 callback from first matcher + 2 callbacks from second matcher = 3
-	// PostToolUse: 1 callback = 1
-	// Total: 4 registrations
-	if len(registrations) != 4 {
-		t.Errorf("Expected 4 registrations, got %d", len(registrations))
+	// PreToolUse should have 2 matcher configs (one per matcher), totaling 3 callback IDs
+	preMatchers, ok := config["PreToolUse"]
+	if !ok || len(preMatchers) != 2 {
+		t.Fatalf("PreToolUse: want 2 matcher configs, got %d", len(preMatchers))
+		return
+	}
+	totalPre := 0
+	for _, m := range preMatchers {
+		totalPre += len(m.HookCallbackIDs)
+	}
+	if totalPre != 3 {
+		t.Errorf("PreToolUse callback IDs: want 3, got %d", totalPre)
 	}
 
-	// Verify callback ID format matches Python SDK: "hook_{counter}"
-	for _, reg := range registrations {
-		if len(reg.CallbackID) == 0 {
-			t.Error("CallbackID should not be empty")
-		}
-		// Check format starts with "hook_"
-		if reg.CallbackID[:5] != "hook_" {
-			t.Errorf("CallbackID should start with 'hook_', got %q", reg.CallbackID)
+	postMatchers, ok := config["PostToolUse"]
+	if !ok || len(postMatchers) != 1 || len(postMatchers[0].HookCallbackIDs) != 1 {
+		t.Errorf("PostToolUse: want 1 matcher with 1 callback id, got %v", postMatchers)
+	}
+
+	// Callback IDs follow Python SDK format hook_{counter}
+	for _, matcher := range preMatchers {
+		for _, id := range matcher.HookCallbackIDs {
+			if len(id) < 5 || id[:5] != "hook_" {
+				t.Errorf("callback id %q does not match hook_<n> format", id)
+			}
 		}
 	}
 }
@@ -812,4 +821,158 @@ func assertHookResponseSent(t *testing.T, transport *hookMockTransport, requestI
 	}
 
 	t.Errorf("No response found for request ID %q", requestID)
+}
+
+// TestHookCallbackHandler_NewEventDispatch covers the dispatch path for the 4
+// hook events added in Phase 1 (PostToolUseFailure, Notification, SubagentStart,
+// PermissionRequest) — verifying parseHookInput produces the right concrete
+// type and the response is sent with success subtype.
+func TestHookCallbackHandler_NewEventDispatch(t *testing.T) {
+	cases := []struct {
+		name        string
+		event       string
+		input       map[string]any
+		assertInput func(t *testing.T, in any)
+	}{
+		{
+			name:  "PostToolUseFailure",
+			event: string(HookEventPostToolUseFailure),
+			input: map[string]any{
+				"session_id":      "s",
+				"transcript_path": "/t",
+				"cwd":             "/c",
+				"hook_event_name": string(HookEventPostToolUseFailure),
+				"tool_name":       "Bash",
+				"tool_input":      map[string]any{"command": "ls"},
+				"tool_use_id":     "tu-1",
+				"is_interrupt":    true,
+				"error":           "boom",
+			},
+			assertInput: func(t *testing.T, in any) {
+				t.Helper()
+				typed, ok := in.(*PostToolUseFailureHookInput)
+				if !ok {
+					t.Fatalf("got %T, want *PostToolUseFailureHookInput", in)
+					return
+				}
+				if typed.ToolName != "Bash" || typed.IsInterrupt == nil || !*typed.IsInterrupt || typed.Error != "boom" {
+					t.Errorf("unexpected fields: %+v", typed)
+				}
+			},
+		},
+		{
+			name:  "Notification",
+			event: string(HookEventNotification),
+			input: map[string]any{
+				"session_id":      "s",
+				"transcript_path": "/t",
+				"cwd":             "/c",
+				"hook_event_name": string(HookEventNotification),
+				"message":         "hello",
+				"title":           "info",
+			},
+			assertInput: func(t *testing.T, in any) {
+				t.Helper()
+				typed, ok := in.(*NotificationHookInput)
+				if !ok {
+					t.Fatalf("got %T, want *NotificationHookInput", in)
+					return
+				}
+				if typed.Message != "hello" {
+					t.Errorf("Message = %q, want hello", typed.Message)
+				}
+			},
+		},
+		{
+			name:  "SubagentStart",
+			event: string(HookEventSubagentStart),
+			input: map[string]any{
+				"session_id":            "s",
+				"transcript_path":       "/t",
+				"cwd":                   "/c",
+				"hook_event_name":       string(HookEventSubagentStart),
+				"agent_id":              "a-1",
+				"agent_transcript_path": "/a",
+				"agent_type":            "code-reviewer",
+			},
+			assertInput: func(t *testing.T, in any) {
+				t.Helper()
+				typed, ok := in.(*SubagentStartHookInput)
+				if !ok {
+					t.Fatalf("got %T, want *SubagentStartHookInput", in)
+					return
+				}
+				if typed.AgentID != "a-1" {
+					t.Errorf("AgentID = %q, want a-1", typed.AgentID)
+				}
+			},
+		},
+		{
+			name:  "PermissionRequest",
+			event: string(HookEventPermissionRequest),
+			input: map[string]any{
+				"session_id":             "s",
+				"transcript_path":        "/t",
+				"cwd":                    "/c",
+				"hook_event_name":        string(HookEventPermissionRequest),
+				"tool_name":              "Bash",
+				"tool_input":             map[string]any{"command": "rm"},
+				"permission_suggestions": []any{"allow", "deny"},
+			},
+			assertInput: func(t *testing.T, in any) {
+				t.Helper()
+				typed, ok := in.(*PermissionRequestHookInput)
+				if !ok {
+					t.Fatalf("got %T, want *PermissionRequestHookInput", in)
+					return
+				}
+				if typed.ToolName != "Bash" || len(typed.PermissionSuggestions) != 2 {
+					t.Errorf("unexpected fields: %+v", typed)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := setupHookTestContext(t, 5*time.Second)
+			defer cancel()
+
+			transport := newHookMockTransport()
+			var got any
+			callback := func(_ context.Context, in any, _ *string, _ HookContext) (HookJSONOutput, error) {
+				got = in
+				return HookJSONOutput{}, nil
+			}
+
+			protocol := NewProtocol(transport, WithHookCallbacks(map[string]HookCallback{"hook_0": callback}))
+			if err := protocol.Start(ctx); err != nil {
+				t.Fatalf("start: %v", err)
+				return
+			}
+			defer func() { _ = protocol.Close() }()
+
+			reqID := "req_" + tc.name
+			request := map[string]any{
+				"type":       MessageTypeControlRequest,
+				"request_id": reqID,
+				"request": map[string]any{
+					"subtype":         SubtypeHookCallback,
+					"callback_id":     "hook_0",
+					"hook_event_name": tc.event,
+					"input":           tc.input,
+				},
+			}
+			if err := protocol.HandleIncomingMessage(ctx, request); err != nil {
+				t.Fatalf("handle: %v", err)
+				return
+			}
+			if got == nil {
+				t.Fatal("callback was not invoked")
+				return
+			}
+			tc.assertInput(t, got)
+			assertHookResponseSent(t, transport, reqID, ResponseSubtypeSuccess)
+		})
+	}
 }

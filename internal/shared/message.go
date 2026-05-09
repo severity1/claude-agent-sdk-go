@@ -277,6 +277,27 @@ func (m *RawControlMessage) Type() string {
 	return m.MessageType
 }
 
+// RawMessage is returned by the parser for unrecognized message types.
+// This provides forward-compatibility when the CLI adds new message types.
+// Consumers should check Type() and handle or ignore unknown messages gracefully.
+type RawMessage struct {
+	MessageType string
+	Data        map[string]any
+}
+
+// Type implements the Message interface.
+func (m *RawMessage) Type() string { return m.MessageType }
+
+// RawContentBlock is returned for unrecognized content block types.
+// Provides forward-compatibility for new block types added to the CLI.
+type RawContentBlock struct {
+	RawBlockType string
+	Data         map[string]any
+}
+
+// BlockType implements the ContentBlock interface.
+func (b *RawContentBlock) BlockType() string { return b.RawBlockType }
+
 // Stream event type constants for Event["type"] discrimination.
 // Use these when type-switching on StreamEvent.Event to handle different event types.
 const (

@@ -252,8 +252,8 @@ func TestFunctionalOptionsPattern(t *testing.T) {
 		t.Errorf("Expected AddDirs length = %d, got %d", len(expectedAddDirs), len(options.AddDirs))
 	}
 
-	if options.MaxThinkingTokens != 10000 {
-		t.Errorf("Expected MaxThinkingTokens = 10000, got %d", options.MaxThinkingTokens)
+	if options.MaxThinkingTokens != 10000 { //nolint:staticcheck // tests the deprecated legacy field on purpose
+		t.Errorf("Expected MaxThinkingTokens = 10000, got %d", options.MaxThinkingTokens) //nolint:staticcheck // tests the deprecated legacy field on purpose
 	}
 
 	if options.PermissionPromptToolName == nil || *options.PermissionPromptToolName != "CustomPermissionTool" {
@@ -584,91 +584,13 @@ func TestWithCLIPath(t *testing.T) {
 	})
 }
 
-// TestWithTransport tests the WithTransport option function
-func TestWithTransport(t *testing.T) {
-	// Create a mock transport for testing
-	mockTransport := &mockTransportForOptions{}
-
-	t.Run("transport_marker_in_extra_args", func(t *testing.T) {
-		options := NewOptions(WithTransport(mockTransport))
-
-		if options.ExtraArgs == nil {
-			t.Fatal("Expected ExtraArgs to be initialized")
-		}
-
-		marker, exists := options.ExtraArgs["__transport_marker__"]
-		if !exists {
-			t.Error("Expected transport marker to be set in ExtraArgs")
-		}
-
-		if marker == nil || *marker != customTransportMarker {
-			t.Errorf("Expected transport marker value 'custom_transport', got %v", marker)
-		}
-	})
-
-	t.Run("transport_with_existing_extra_args", func(t *testing.T) {
-		options := NewOptions(
-			WithExtraArgs(map[string]*string{"existing": stringPtr("value")}),
-			WithTransport(mockTransport),
-		)
-
-		if options.ExtraArgs == nil {
-			t.Fatal("Expected ExtraArgs to be preserved")
-		}
-
-		// Check existing arg is preserved
-		existing, exists := options.ExtraArgs["existing"]
-		if !exists || existing == nil || *existing != "value" {
-			t.Error("Expected existing ExtraArgs to be preserved")
-		}
-
-		// Check transport marker is added
-		marker, exists := options.ExtraArgs["__transport_marker__"]
-		if !exists || marker == nil || *marker != customTransportMarker {
-			t.Error("Expected transport marker to be added to existing ExtraArgs")
-		}
-	})
-
-	t.Run("transport_with_nil_extra_args", func(t *testing.T) {
-		// Create options with nil ExtraArgs
-		options := &Options{}
-
-		// Apply WithTransport option
-		WithTransport(mockTransport)(options)
-
-		if options.ExtraArgs == nil {
-			t.Error("Expected ExtraArgs to be initialized")
-		}
-
-		marker, exists := options.ExtraArgs["__transport_marker__"]
-		if !exists || marker == nil || *marker != customTransportMarker {
-			t.Error("Expected transport marker to be set when ExtraArgs was nil")
-		}
-	})
-
-	t.Run("multiple_transport_calls", func(t *testing.T) {
-		anotherMockTransport := &mockTransportForOptions{}
-
-		options := NewOptions(
-			WithTransport(mockTransport),
-			WithTransport(anotherMockTransport), // Should overwrite
-		)
-
-		// Should only have one transport marker (last one wins)
-		marker, exists := options.ExtraArgs["__transport_marker__"]
-		if !exists || marker == nil || *marker != customTransportMarker {
-			t.Error("Expected last transport to set the marker")
-		}
-	})
-}
-
 // Helper Functions - following client_test.go patterns
 
 // assertOptionsMaxThinkingTokens verifies MaxThinkingTokens value
 func assertOptionsMaxThinkingTokens(t *testing.T, options *Options, expected int) {
 	t.Helper()
-	if options.MaxThinkingTokens != expected {
-		t.Errorf("Expected MaxThinkingTokens = %d, got %d", expected, options.MaxThinkingTokens)
+	if options.MaxThinkingTokens != expected { //nolint:staticcheck // tests the deprecated legacy field on purpose
+		t.Errorf("Expected MaxThinkingTokens = %d, got %d", expected, options.MaxThinkingTokens) //nolint:staticcheck // tests the deprecated legacy field on purpose
 	}
 }
 
@@ -873,24 +795,6 @@ func assertOptionsValidationError(t *testing.T, options *Options, shouldError bo
 func stringPtr(s string) *string {
 	return &s
 }
-
-// mockTransportForOptions is a minimal mock transport for testing options
-type mockTransportForOptions struct{}
-
-func (m *mockTransportForOptions) Connect(_ context.Context) error { return nil }
-func (m *mockTransportForOptions) SendMessage(_ context.Context, _ StreamMessage) error {
-	return nil
-}
-
-func (m *mockTransportForOptions) ReceiveMessages(_ context.Context) (<-chan Message, <-chan error) {
-	return nil, nil
-}
-func (m *mockTransportForOptions) Interrupt(_ context.Context) error                   { return nil }
-func (m *mockTransportForOptions) SetModel(_ context.Context, _ *string) error         { return nil }
-func (m *mockTransportForOptions) SetPermissionMode(_ context.Context, _ string) error { return nil }
-func (m *mockTransportForOptions) RewindFiles(_ context.Context, _ string) error       { return nil }
-func (m *mockTransportForOptions) Close() error                                        { return nil }
-func (m *mockTransportForOptions) GetValidator() *StreamValidator                      { return &StreamValidator{} }
 
 // TestWithEnvOptions tests environment variable functional options following table-driven pattern
 func TestWithEnvOptions(t *testing.T) {
@@ -3596,6 +3500,90 @@ func TestWithSdkMcpServer(t *testing.T) {
 		}
 		if sdkServer.Type != McpServerTypeSdk {
 			t.Errorf("expected type %q, got %q", McpServerTypeSdk, sdkServer.Type)
+		}
+	})
+}
+
+// TestThinkingConfig_TypeSystem verifies the ThinkingConfig sealed union type system.
+func TestThinkingConfig_TypeSystem(t *testing.T) {
+	// Compile-time interface satisfaction checks
+	var _ ThinkingConfig = ThinkingConfigAdaptive{}
+	var _ ThinkingConfig = ThinkingConfigEnabled{BudgetTokens: 1000}
+	var _ ThinkingConfig = ThinkingConfigDisabled{}
+
+	t.Run("WithThinkingAdaptive_sets_field", func(t *testing.T) {
+		opts := NewOptions(WithThinkingAdaptive())
+		if _, ok := opts.Thinking.(ThinkingConfigAdaptive); !ok {
+			t.Errorf("expected ThinkingConfigAdaptive, got %T", opts.Thinking)
+		}
+	})
+
+	t.Run("WithThinkingBudget_sets_field", func(t *testing.T) {
+		opts := NewOptions(WithThinkingBudget(5000))
+		enabled, ok := opts.Thinking.(ThinkingConfigEnabled)
+		if !ok {
+			t.Fatalf("expected ThinkingConfigEnabled, got %T", opts.Thinking)
+		}
+		if enabled.BudgetTokens != 5000 {
+			t.Errorf("expected BudgetTokens=5000, got %d", enabled.BudgetTokens)
+		}
+	})
+
+	t.Run("WithThinkingDisabled_sets_field", func(t *testing.T) {
+		opts := NewOptions(WithThinkingDisabled())
+		if _, ok := opts.Thinking.(ThinkingConfigDisabled); !ok {
+			t.Errorf("expected ThinkingConfigDisabled, got %T", opts.Thinking)
+		}
+	})
+
+	t.Run("WithThinking_sets_arbitrary_config", func(t *testing.T) {
+		opts := NewOptions(WithThinking(ThinkingConfigEnabled{BudgetTokens: 2000}))
+		enabled, ok := opts.Thinking.(ThinkingConfigEnabled)
+		if !ok {
+			t.Fatalf("expected ThinkingConfigEnabled, got %T", opts.Thinking)
+		}
+		if enabled.BudgetTokens != 2000 {
+			t.Errorf("expected BudgetTokens=2000, got %d", enabled.BudgetTokens)
+		}
+	})
+
+	t.Run("default_thinking_is_nil", func(t *testing.T) {
+		opts := NewOptions()
+		if opts.Thinking != nil {
+			t.Errorf("expected Thinking to be nil by default, got %T", opts.Thinking)
+		}
+	})
+}
+
+// TestWithEffortOption verifies the WithEffort functional option.
+func TestWithEffortOption(t *testing.T) {
+	tests := []struct {
+		name     string
+		effort   string
+		expected string
+	}{
+		{"low", "low", "low"},
+		{"medium", "medium", "medium"},
+		{"high", "high", "high"},
+		{"max", "max", "max"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := NewOptions(WithEffort(tt.effort))
+			if opts.Effort == nil {
+				t.Fatal("expected Effort to be set")
+			}
+			if *opts.Effort != tt.expected {
+				t.Errorf("expected Effort=%q, got %q", tt.expected, *opts.Effort)
+			}
+		})
+	}
+
+	t.Run("default_effort_is_nil", func(t *testing.T) {
+		opts := NewOptions()
+		if opts.Effort != nil {
+			t.Errorf("expected Effort to be nil by default, got %q", *opts.Effort)
 		}
 	})
 }

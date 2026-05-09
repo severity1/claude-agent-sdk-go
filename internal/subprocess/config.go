@@ -67,7 +67,16 @@ func (t *Transport) generateMcpConfigFile() (string, error) {
 		return "", fmt.Errorf("failed to sync MCP config file: %w", err)
 	}
 
-	// Store for cleanup later
+	// Close the handle now that the CLI will read the file by path. Keeping the
+	// handle open would leak an FD for the lifetime of the subprocess and on
+	// some platforms (notably Windows) prevent the CLI from opening the file.
+	// We retain tmpFile only so the cleanup path can call Name() and Remove().
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("failed to close MCP config file: %w", err)
+	}
+
+	// Store for cleanup later (Name() remains valid on a closed handle)
 	t.mcpConfigFile = tmpFile
 
 	return tmpFile.Name(), nil
@@ -127,6 +136,28 @@ func (t *Transport) SetPermissionMode(ctx context.Context, mode string) error {
 	return t.protocol.SetPermissionMode(ctx, mode)
 }
 
+// GetMcpStatus returns the current status of all connected MCP servers.
+// Only available in streaming mode (when closeStdin is false).
+//
+// The control protocol is initialized lazily on first call so callers get
+// MCP status even when no up-front feature (hooks/permissions/MCP/agents)
+// triggered the handshake. Without lazy init, the control request would be
+// sent to a CLI that never entered protocol mode and time out after 5s.
+func (t *Transport) GetMcpStatus(ctx context.Context) (*control.McpStatusResponse, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	if !t.connected {
+		return nil, fmt.Errorf("transport not connected")
+	}
+
+	if err := t.ensureProtocolInitialized(ctx); err != nil {
+		return nil, fmt.Errorf("GetMcpStatus: %w", err)
+	}
+
+	return t.protocol.GetMcpStatus(ctx)
+}
+
 // RewindFiles reverts tracked files to their state at a specific user message.
 // This method requires control protocol integration which is only available
 // in streaming mode (when closeStdin is false).
@@ -175,13 +206,14 @@ func (t *Transport) buildProtocolOptions() []control.ProtocolOption {
 					return nil, err
 				}
 
-				// Convert result back to strongly-typed PermissionResult
+				// Convert result back to strongly-typed PermissionResult.
+				// A type mismatch here means the user's callback returned a
+				// value that isn't a PermissionResult — surface that loudly
+				// instead of silently denying, so the bug isn't masked.
 				if pr, ok := result.(control.PermissionResult); ok {
 					return pr, nil
 				}
-
-				// Fallback: deny if result type is unexpected
-				return control.NewPermissionResultDeny("invalid permission result type"), nil
+				return nil, fmt.Errorf("permission callback returned %T; expected control.PermissionResult (use NewPermissionResultAllow/Deny)", result)
 			}))
 	}
 
@@ -204,6 +236,11 @@ func (t *Transport) buildProtocolOptions() []control.ProtocolOption {
 		if len(sdkServers) > 0 {
 			opts = append(opts, control.WithSdkMcpServers(sdkServers))
 		}
+	}
+
+	// Pass options so Initialize can include agents and other config
+	if t.options != nil {
+		opts = append(opts, control.WithOptions(t.options))
 	}
 
 	return opts

@@ -110,6 +110,40 @@ jobs:
           exit 1
         fi
 
+  deadcode:
+    name: Dead Code Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Install deadcode
+      run: go install golang.org/x/tools/cmd/deadcode@latest
+
+    - name: Run deadcode (internal/* only, rooted at examples + internal tests)
+      run: |
+        # Examples are the SDK's only main entrypoints; -test=true also includes
+        # internal test packages as roots so test-only helpers count as
+        # reachable. Filter to internal/* keeps public API noise out.
+        out="$(deadcode -test=true \
+          -filter='github.com/severity1/claude-agent-sdk-go/internal/...' \
+          ./examples/... ./internal/...)"
+        if [ -n "$out" ]; then
+          echo "Unreachable internal functions detected:"
+          echo "$out"
+          echo ""
+          echo "Either remove them or exercise via examples/tests."
+          exit 1
+        fi
+        echo "No unreachable internal functions"
+
   govulncheck:
     name: Go Vulnerability Check
     runs-on: ubuntu-latest
