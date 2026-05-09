@@ -126,6 +126,8 @@ type Transport interface {
 	// RewindFiles reverts tracked files to their state at a specific user message.
 	// Requires file checkpointing to be enabled and control protocol initialized.
 	RewindFiles(ctx context.Context, userMessageID string) error
+	// GetMcpStatus returns the connection status of all configured MCP servers.
+	GetMcpStatus(ctx context.Context) (*McpStatusResponse, error)
 	Close() error
 	GetValidator() *StreamValidator
 }
@@ -162,6 +164,39 @@ type SetPermissionModeRequest = control.SetPermissionModeRequest
 // SetModelRequest to change AI model via control protocol.
 type SetModelRequest = control.SetModelRequest
 
+// GetMcpStatusRequest to query MCP server status via control protocol.
+type GetMcpStatusRequest = control.GetMcpStatusRequest
+
+// McpServerConnectionStatus represents the connection state of an MCP server.
+type McpServerConnectionStatus = control.McpServerConnectionStatus
+
+// Re-export MCP server connection status constants
+const (
+	McpServerConnectionStatusConnected = control.McpServerConnectionStatusConnected
+	McpServerConnectionStatusFailed    = control.McpServerConnectionStatusFailed
+	McpServerConnectionStatusNeedsAuth = control.McpServerConnectionStatusNeedsAuth
+	McpServerConnectionStatusPending   = control.McpServerConnectionStatusPending
+	McpServerConnectionStatusDisabled  = control.McpServerConnectionStatusDisabled
+)
+
+// McpServerInfo contains version information about a connected MCP server.
+type McpServerInfo = control.McpServerInfo
+
+// McpToolAnnotations describes behavioral hints for an MCP tool.
+type McpToolAnnotations = control.McpToolAnnotations
+
+// McpToolInfo describes a tool exposed by an MCP server.
+type McpToolInfo = control.McpToolInfo
+
+// McpServerStatusConfig covers all MCP server config variants, discriminated by Type.
+type McpServerStatusConfig = control.McpServerStatusConfig
+
+// McpServerStatus contains the full status of a single MCP server.
+type McpServerStatus = control.McpServerStatus
+
+// McpStatusResponse is the response payload for a GetMcpStatus request.
+type McpStatusResponse = control.McpStatusResponse
+
 // ControlProtocol manages bidirectional control communication with CLI.
 type ControlProtocol = control.Protocol
 
@@ -175,6 +210,7 @@ const (
 	SubtypeSetModel          = control.SubtypeSetModel
 	SubtypeHookCallback      = control.SubtypeHookCallback
 	SubtypeMcpMessage        = control.SubtypeMcpMessage
+	SubtypeGetMcpStatus      = control.SubtypeGetMcpStatus
 
 	// Control response subtypes
 	ResponseSubtypeSuccess = control.ResponseSubtypeSuccess

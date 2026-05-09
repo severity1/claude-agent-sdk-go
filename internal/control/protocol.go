@@ -460,6 +460,27 @@ func (p *Protocol) SetPermissionMode(ctx context.Context, mode string) error {
 	return err
 }
 
+// GetMcpStatus returns the connection status of all configured MCP servers.
+func (p *Protocol) GetMcpStatus(ctx context.Context) (*McpStatusResponse, error) {
+	result, err := p.SendControlRequest(ctx, GetMcpStatusRequest{
+		Subtype: SubtypeGetMcpStatus,
+	}, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	// SendControlRequest returns Response.Response as any (map[string]any from JSON).
+	// Re-marshal + unmarshal into typed struct.
+	data, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("marshal mcp status response: %w", err)
+	}
+	var resp McpStatusResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal mcp status response: %w", err)
+	}
+	return &resp, nil
+}
+
 // RewindFiles reverts tracked files to their state at a specific user message.
 // The userMessageID should be the UUID from a UserMessage received during the session.
 // Requires EnableFileCheckpointing to be set when creating the client.

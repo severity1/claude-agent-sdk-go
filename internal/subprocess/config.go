@@ -152,6 +152,28 @@ func (t *Transport) RewindFiles(ctx context.Context, userMessageID string) error
 	return t.protocol.RewindFiles(ctx, userMessageID)
 }
 
+// GetMcpStatus returns the connection status of all configured MCP servers.
+// This method requires control protocol integration which is only available
+// in streaming mode (when closeStdin is false).
+func (t *Transport) GetMcpStatus(ctx context.Context) (*control.McpStatusResponse, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	if !t.connected {
+		return nil, fmt.Errorf("transport not connected")
+	}
+
+	if t.closeStdin {
+		return nil, fmt.Errorf("GetMcpStatus not available in one-shot mode")
+	}
+
+	if t.protocol == nil {
+		return nil, fmt.Errorf("control protocol not initialized")
+	}
+
+	return t.protocol.GetMcpStatus(ctx)
+}
+
 // buildProtocolOptions constructs control protocol options from transport configuration.
 // This extracts callback wiring logic from Connect to reduce cyclomatic complexity.
 func (t *Transport) buildProtocolOptions() []control.ProtocolOption {

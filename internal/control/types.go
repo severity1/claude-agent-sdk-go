@@ -251,6 +251,84 @@ type CanUseToolCallback func(
 ) (PermissionResult, error)
 
 // =============================================================================
+// MCP Status Types (Python PR #516)
+// =============================================================================
+
+// SubtypeGetMcpStatus is the control request subtype for querying MCP server status.
+const SubtypeGetMcpStatus = "mcp_status"
+
+// GetMcpStatusRequest requests the status of all configured MCP servers.
+type GetMcpStatusRequest struct {
+	Subtype string `json:"subtype"`
+}
+
+// McpServerConnectionStatus represents the connection state of an MCP server.
+type McpServerConnectionStatus string
+
+const (
+	// McpServerConnectionStatusConnected indicates the server is connected and ready.
+	McpServerConnectionStatusConnected McpServerConnectionStatus = "connected"
+	// McpServerConnectionStatusFailed indicates the server failed to connect.
+	McpServerConnectionStatusFailed McpServerConnectionStatus = "failed"
+	// McpServerConnectionStatusNeedsAuth indicates the server requires authentication.
+	McpServerConnectionStatusNeedsAuth McpServerConnectionStatus = "needs-auth"
+	// McpServerConnectionStatusPending indicates the server connection is in progress.
+	McpServerConnectionStatusPending McpServerConnectionStatus = "pending"
+	// McpServerConnectionStatusDisabled indicates the server is disabled.
+	McpServerConnectionStatusDisabled McpServerConnectionStatus = "disabled"
+)
+
+// McpServerInfo contains version information about a connected MCP server.
+type McpServerInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// McpToolAnnotations describes behavioral hints for an MCP tool.
+// All fields are optional (pointer) to distinguish "not set" from false.
+type McpToolAnnotations struct {
+	ReadOnly    *bool `json:"readOnly,omitempty"`
+	Destructive *bool `json:"destructive,omitempty"`
+	OpenWorld   *bool `json:"openWorld,omitempty"`
+}
+
+// McpToolInfo describes a tool exposed by an MCP server.
+type McpToolInfo struct {
+	Name        string              `json:"name"`
+	Description *string             `json:"description,omitempty"`
+	Annotations *McpToolAnnotations `json:"annotations,omitempty"`
+}
+
+// McpServerStatusConfig is a flat struct covering all server config variants
+// (stdio/sse/http/sdk/claudeai-proxy), discriminated by Type.
+type McpServerStatusConfig struct {
+	Type    string            `json:"type"`
+	Command *string           `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	URL     *string           `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Name    *string           `json:"name,omitempty"`
+	ID      *string           `json:"id,omitempty"`
+}
+
+// McpServerStatus contains the full status of a single MCP server.
+type McpServerStatus struct {
+	Name       string                    `json:"name"`
+	Status     McpServerConnectionStatus `json:"status"`
+	ServerInfo *McpServerInfo            `json:"serverInfo,omitempty"`
+	Error      *string                   `json:"error,omitempty"`
+	Config     *McpServerStatusConfig    `json:"config,omitempty"`
+	Scope      *string                   `json:"scope,omitempty"`
+	Tools      []McpToolInfo             `json:"tools,omitempty"`
+}
+
+// McpStatusResponse is the response payload for a GetMcpStatus request.
+type McpStatusResponse struct {
+	McpServers []McpServerStatus `json:"mcpServers"`
+}
+
+// =============================================================================
 // MCP Server Types (Issue #7)
 // =============================================================================
 

@@ -2050,3 +2050,248 @@ func testInitErrOnlyFirstDelivered(t *testing.T) {
 		// Good - empty
 	}
 }
+
+// =============================================================================
+// Phase 8: GetMcpStatus Tests (Python PR #516)
+// =============================================================================
+
+func TestProtocolGetMcpStatus(t *testing.T) {
+	t.Run("success_connected_server", testGetMcpStatusConnected)
+	t.Run("success_failed_server", testGetMcpStatusFailed)
+	t.Run("success_multiple_servers", testGetMcpStatusMultiple)
+	t.Run("error_response", testGetMcpStatusError)
+	t.Run("timeout", testGetMcpStatusTimeout)
+}
+
+func testGetMcpStatusConnected(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	serverName := "my-server"
+	scope := "local"
+	toolDesc := "reads a file"
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{
+			"mcpServers": []any{
+				map[string]any{
+					"name":   serverName,
+					"status": "connected",
+					"scope":  scope,
+					"tools": []any{
+						map[string]any{
+							"name":        "read_file",
+							"description": toolDesc,
+						},
+					},
+				},
+			},
+		})
+	}()
+
+	resp, err := protocol.GetMcpStatus(ctx)
+	assertControlNoError(t, err)
+
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if len(resp.McpServers) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(resp.McpServers))
+	}
+
+	srv := resp.McpServers[0]
+	assertControlEqual(t, serverName, srv.Name)
+	assertControlEqual(t, McpServerConnectionStatusConnected, srv.Status)
+	if srv.Scope == nil || *srv.Scope != scope {
+		t.Errorf("expected scope %q, got %v", scope, srv.Scope)
+	}
+	if len(srv.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(srv.Tools))
+	}
+	assertControlEqual(t, "read_file", srv.Tools[0].Name)
+	if srv.Tools[0].Description == nil || *srv.Tools[0].Description != toolDesc {
+		t.Errorf("expected description %q, got %v", toolDesc, srv.Tools[0].Description)
+	}
+}
+
+func testGetMcpStatusFailed(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	errMsg := "connection refused"
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{
+			"mcpServers": []any{
+				map[string]any{
+					"name":   "broken-server",
+					"status": "failed",
+					"error":  errMsg,
+				},
+			},
+		})
+	}()
+
+	resp, err := protocol.GetMcpStatus(ctx)
+	assertControlNoError(t, err)
+
+	if resp == nil || len(resp.McpServers) != 1 {
+		t.Fatal("expected 1 server in response")
+	}
+	srv := resp.McpServers[0]
+	assertControlEqual(t, McpServerConnectionStatusFailed, srv.Status)
+	if srv.Error == nil || *srv.Error != errMsg {
+		t.Errorf("expected error %q, got %v", errMsg, srv.Error)
+	}
+}
+
+func testGetMcpStatusMultiple(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{
+			"mcpServers": []any{
+				map[string]any{"name": "server-a", "status": "connected"},
+				map[string]any{"name": "server-b", "status": "pending"},
+				map[string]any{"name": "server-c", "status": "disabled"},
+			},
+		})
+	}()
+
+	resp, err := protocol.GetMcpStatus(ctx)
+	assertControlNoError(t, err)
+
+	if resp == nil || len(resp.McpServers) != 3 {
+		t.Fatalf("expected 3 servers, got %d", len(resp.McpServers))
+	}
+	assertControlEqual(t, McpServerConnectionStatusConnected, resp.McpServers[0].Status)
+	assertControlEqual(t, McpServerConnectionStatusPending, resp.McpServers[1].Status)
+	assertControlEqual(t, McpServerConnectionStatusDisabled, resp.McpServers[2].Status)
+}
+
+func testGetMcpStatusError(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectErrorResponse(req.RequestID, "mcp status unavailable")
+	}()
+
+	_, err = protocol.GetMcpStatus(ctx)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "mcp status unavailable") {
+		t.Errorf("expected error message to contain 'mcp status unavailable', got: %v", err)
+	}
+}
+
+func testGetMcpStatusTimeout(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	// Use a very short init timeout so the test doesn't hang
+	protocol := NewProtocol(transport, WithInitTimeout(100*time.Millisecond))
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	// Don't inject any response - GetMcpStatus uses its own 5s timeout,
+	// but we cancel the context to simulate timeout quickly.
+	timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer timeoutCancel()
+
+	_, err = protocol.GetMcpStatus(timeoutCtx)
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+}

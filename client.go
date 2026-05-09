@@ -36,6 +36,9 @@ type Client interface {
 	// Requires WithFileCheckpointing() or WithEnableFileCheckpointing(true) option.
 	// Only works in streaming mode (after Connect()).
 	RewindFiles(ctx context.Context, messageUUID string) error
+	// GetMcpStatus returns the connection status of all configured MCP servers.
+	// Only works in streaming mode (after Connect()).
+	GetMcpStatus(ctx context.Context) (*McpStatusResponse, error)
 	GetStreamIssues() []StreamIssue
 	GetStreamStats() StreamStats
 	GetServerInfo(ctx context.Context) (map[string]interface{}, error)
@@ -532,6 +535,25 @@ func (c *ClientImpl) RewindFiles(ctx context.Context, messageUUID string) error 
 	}
 
 	return transport.RewindFiles(ctx, messageUUID)
+}
+
+// GetMcpStatus returns the connection status of all configured MCP servers.
+// Returns error if not connected or if the control request fails.
+func (c *ClientImpl) GetMcpStatus(ctx context.Context) (*McpStatusResponse, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	c.mu.RLock()
+	connected := c.connected
+	transport := c.transport
+	c.mu.RUnlock()
+
+	if !connected || transport == nil {
+		return nil, fmt.Errorf("client not connected")
+	}
+
+	return transport.GetMcpStatus(ctx)
 }
 
 // clientIterator implements MessageIterator for client message reception

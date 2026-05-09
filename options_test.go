@@ -889,8 +889,11 @@ func (m *mockTransportForOptions) Interrupt(_ context.Context) error            
 func (m *mockTransportForOptions) SetModel(_ context.Context, _ *string) error         { return nil }
 func (m *mockTransportForOptions) SetPermissionMode(_ context.Context, _ string) error { return nil }
 func (m *mockTransportForOptions) RewindFiles(_ context.Context, _ string) error       { return nil }
-func (m *mockTransportForOptions) Close() error                                        { return nil }
-func (m *mockTransportForOptions) GetValidator() *StreamValidator                      { return &StreamValidator{} }
+func (m *mockTransportForOptions) GetMcpStatus(_ context.Context) (*McpStatusResponse, error) {
+	return &McpStatusResponse{}, nil
+}
+func (m *mockTransportForOptions) Close() error                   { return nil }
+func (m *mockTransportForOptions) GetValidator() *StreamValidator { return &StreamValidator{} }
 
 // TestWithEnvOptions tests environment variable functional options following table-driven pattern
 func TestWithEnvOptions(t *testing.T) {
