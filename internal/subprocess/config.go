@@ -168,7 +168,7 @@ func (t *Transport) GetMcpStatus(ctx context.Context) (*control.McpStatusRespons
 	}
 
 	if t.protocol == nil {
-		return nil, fmt.Errorf("control protocol not initialized")
+		return nil, fmt.Errorf("internal error: transport connected but control protocol is nil")
 	}
 
 	return t.protocol.GetMcpStatus(ctx)

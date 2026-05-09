@@ -62,6 +62,7 @@ func testSubtypeConstants(t *testing.T) {
 		{"hook_callback", SubtypeHookCallback, "hook_callback"},
 		{"mcp_message", SubtypeMcpMessage, "mcp_message"},
 		{"rewind_files", SubtypeRewindFiles, "rewind_files"},
+		{"get_mcp_status", SubtypeGetMcpStatus, "mcp_status"},
 	}
 
 	for _, tc := range tests {
@@ -2059,7 +2060,10 @@ func TestProtocolGetMcpStatus(t *testing.T) {
 	t.Run("success_connected_server", testGetMcpStatusConnected)
 	t.Run("success_failed_server", testGetMcpStatusFailed)
 	t.Run("success_multiple_servers", testGetMcpStatusMultiple)
+	t.Run("success_empty_servers", testGetMcpStatusEmpty)
 	t.Run("error_response", testGetMcpStatusError)
+	t.Run("malformed_response", testGetMcpStatusMalformed)
+	t.Run("nil_response", testGetMcpStatusNilResponse)
 	t.Run("timeout", testGetMcpStatusTimeout)
 }
 
@@ -2092,7 +2096,12 @@ func testGetMcpStatusConnected(t *testing.T) {
 			transport.mu.Unlock()
 			return
 		}
+		// Verify the subtype on the wire matches the Python SDK exactly.
+		reqData, _ := req.Request.(map[string]any)
 		transport.mu.Unlock()
+		if reqData != nil {
+			assertControlEqual(t, SubtypeGetMcpStatus, reqData["subtype"])
+		}
 		transport.injectResponse(req.RequestID, map[string]any{
 			"mcpServers": []any{
 				map[string]any{
@@ -2218,6 +2227,7 @@ func testGetMcpStatusMultiple(t *testing.T) {
 				map[string]any{"name": "server-a", "status": "connected"},
 				map[string]any{"name": "server-b", "status": "pending"},
 				map[string]any{"name": "server-c", "status": "disabled"},
+				map[string]any{"name": "server-d", "status": "needs-auth"},
 			},
 		})
 	}()
@@ -2225,12 +2235,13 @@ func testGetMcpStatusMultiple(t *testing.T) {
 	resp, err := protocol.GetMcpStatus(ctx)
 	assertControlNoError(t, err)
 
-	if resp == nil || len(resp.McpServers) != 3 {
-		t.Fatalf("expected 3 servers, got %d", len(resp.McpServers))
+	if resp == nil || len(resp.McpServers) != 4 {
+		t.Fatalf("expected 4 servers, got %d", len(resp.McpServers))
 	}
 	assertControlEqual(t, McpServerConnectionStatusConnected, resp.McpServers[0].Status)
 	assertControlEqual(t, McpServerConnectionStatusPending, resp.McpServers[1].Status)
 	assertControlEqual(t, McpServerConnectionStatusDisabled, resp.McpServers[2].Status)
+	assertControlEqual(t, McpServerConnectionStatusNeedsAuth, resp.McpServers[3].Status)
 }
 
 func testGetMcpStatusError(t *testing.T) {
@@ -2278,20 +2289,139 @@ func testGetMcpStatusTimeout(t *testing.T) {
 	defer cancel()
 
 	transport := newControlMockTransport()
-	// Use a very short init timeout so the test doesn't hang
-	protocol := NewProtocol(transport, WithInitTimeout(100*time.Millisecond))
+	protocol := NewProtocol(transport)
 
 	err := protocol.Start(ctx)
 	assertControlNoError(t, err)
 	defer func() { _ = protocol.Close() }()
 
-	// Don't inject any response - GetMcpStatus uses its own 5s timeout,
-	// but we cancel the context to simulate timeout quickly.
+	// Cancel the context to simulate timeout - no response is injected.
 	timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer timeoutCancel()
 
 	_, err = protocol.GetMcpStatus(timeoutCtx)
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
+	}
+}
+
+func testGetMcpStatusEmpty(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		transport.injectResponse(req.RequestID, map[string]any{
+			"mcpServers": []any{},
+		})
+	}()
+
+	resp, err := protocol.GetMcpStatus(ctx)
+	assertControlNoError(t, err)
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if len(resp.McpServers) != 0 {
+		t.Errorf("expected 0 servers, got %d", len(resp.McpServers))
+	}
+}
+
+func testGetMcpStatusMalformed(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		// Inject mcpServers as a string instead of an array - should fail unmarshal.
+		transport.injectResponse(req.RequestID, map[string]any{
+			"mcpServers": "not-an-array",
+		})
+	}()
+
+	_, err = protocol.GetMcpStatus(ctx)
+	if err == nil {
+		t.Fatal("expected error for malformed response, got nil")
+	}
+	if !strings.Contains(err.Error(), "unmarshal mcp status response") {
+		t.Errorf("expected error to contain 'unmarshal mcp status response', got: %v", err)
+	}
+}
+
+func testGetMcpStatusNilResponse(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+
+	err := protocol.Start(ctx)
+	assertControlNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.mu.Lock()
+		if len(transport.writtenData) == 0 {
+			transport.mu.Unlock()
+			return
+		}
+		var req SDKControlRequest
+		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
+			transport.mu.Unlock()
+			return
+		}
+		transport.mu.Unlock()
+		// Inject nil response body - CLI returned success with null body.
+		transport.injectResponse(req.RequestID, nil)
+	}()
+
+	_, err = protocol.GetMcpStatus(ctx)
+	if err == nil {
+		t.Fatal("expected error for nil response, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty response") {
+		t.Errorf("expected error to contain 'empty response', got: %v", err)
 	}
 }

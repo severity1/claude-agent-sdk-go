@@ -262,6 +262,11 @@ type GetMcpStatusRequest struct {
 	Subtype string `json:"subtype"`
 }
 
+// NewGetMcpStatusRequest creates a properly initialized GetMcpStatusRequest.
+func NewGetMcpStatusRequest() GetMcpStatusRequest {
+	return GetMcpStatusRequest{Subtype: SubtypeGetMcpStatus}
+}
+
 // McpServerConnectionStatus represents the connection state of an MCP server.
 type McpServerConnectionStatus string
 
@@ -312,15 +317,27 @@ type McpServerStatusConfig struct {
 	ID      *string           `json:"id,omitempty"`
 }
 
+// MCP server config type constants for McpServerStatusConfig.Type.
+const (
+	McpServerConfigTypeStdio    = "stdio"
+	McpServerConfigTypeSSE      = "sse"
+	McpServerConfigTypeHTTP     = "http"
+	McpServerConfigTypeSDK      = "sdk"
+	McpServerConfigTypeClaudeAI = "claudeai-proxy"
+)
+
 // McpServerStatus contains the full status of a single MCP server.
 type McpServerStatus struct {
-	Name       string                    `json:"name"`
-	Status     McpServerConnectionStatus `json:"status"`
-	ServerInfo *McpServerInfo            `json:"serverInfo,omitempty"`
-	Error      *string                   `json:"error,omitempty"`
-	Config     *McpServerStatusConfig    `json:"config,omitempty"`
-	Scope      *string                   `json:"scope,omitempty"`
-	Tools      []McpToolInfo             `json:"tools,omitempty"`
+	Name   string                    `json:"name"`
+	Status McpServerConnectionStatus `json:"status"`
+	// ServerInfo contains version info. Only non-nil when Status is McpServerConnectionStatusConnected.
+	ServerInfo *McpServerInfo `json:"serverInfo,omitempty"`
+	// Error contains the error message. Only non-nil when Status is McpServerConnectionStatusFailed.
+	Error  *string                `json:"error,omitempty"`
+	Config *McpServerStatusConfig `json:"config,omitempty"`
+	Scope  *string                `json:"scope,omitempty"`
+	// Tools lists tools exposed by this server. Only populated when Status is McpServerConnectionStatusConnected.
+	Tools []McpToolInfo `json:"tools,omitempty"`
 }
 
 // McpStatusResponse is the response payload for a GetMcpStatus request.

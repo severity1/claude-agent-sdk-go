@@ -179,6 +179,15 @@ const (
 	McpServerConnectionStatusDisabled  = control.McpServerConnectionStatusDisabled
 )
 
+// Re-export MCP server config type constants for McpServerStatusConfig.Type.
+const (
+	McpServerConfigTypeStdio    = control.McpServerConfigTypeStdio
+	McpServerConfigTypeSSE      = control.McpServerConfigTypeSSE
+	McpServerConfigTypeHTTP     = control.McpServerConfigTypeHTTP
+	McpServerConfigTypeSDK      = control.McpServerConfigTypeSDK
+	McpServerConfigTypeClaudeAI = control.McpServerConfigTypeClaudeAI
+)
+
 // McpServerInfo contains version information about a connected MCP server.
 type McpServerInfo = control.McpServerInfo
 

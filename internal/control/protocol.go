@@ -462,14 +462,16 @@ func (p *Protocol) SetPermissionMode(ctx context.Context, mode string) error {
 
 // GetMcpStatus returns the connection status of all configured MCP servers.
 func (p *Protocol) GetMcpStatus(ctx context.Context) (*McpStatusResponse, error) {
-	result, err := p.SendControlRequest(ctx, GetMcpStatusRequest{
-		Subtype: SubtypeGetMcpStatus,
-	}, 5*time.Second)
+	result, err := p.SendControlRequest(ctx, NewGetMcpStatusRequest(), 5*time.Second)
 	if err != nil {
 		return nil, err
 	}
+	if result == nil {
+		return nil, fmt.Errorf("mcp status response: CLI returned empty response")
+	}
 	// SendControlRequest returns Response.Response as any (map[string]any from JSON).
-	// Re-marshal + unmarshal into typed struct.
+	// Re-marshal + unmarshal into typed struct - necessary because SendControlRequest
+	// returns any and there is no generic typed variant.
 	data, err := json.Marshal(result)
 	if err != nil {
 		return nil, fmt.Errorf("marshal mcp status response: %w", err)
