@@ -14,7 +14,7 @@ const testResultAnswer42 = "The answer is 42"
 const validSystemStatusJSON = `{"type": "system", "subtype": "status"}`
 
 // TestParseValidMessages tests parsing of valid message types
-func TestParseValidMessages(t *testing.T) {
+func TestParseValidMessages(t *testing.T) { //nolint:gocyclo
 	tests := []struct {
 		name         string
 		data         map[string]any
