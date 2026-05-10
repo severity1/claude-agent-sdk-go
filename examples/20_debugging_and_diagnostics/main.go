@@ -206,6 +206,17 @@ func demonstrateServerDiagnostics() {
 				}
 				switch msg := message.(type) {
 				case *claudecode.AssistantMessage:
+					// HasError checks the top-level error field (PR #506 fix).
+					// This is distinct from ResultMessage.IsError - it signals
+					// a rate limit, billing issue, or server error on the message itself.
+					if msg.HasError() {
+						errType := msg.GetError()
+						if msg.IsRateLimited() {
+							fmt.Printf("\n[rate limited] %s\n", errType)
+						} else {
+							fmt.Printf("\n[assistant error] %s\n", errType)
+						}
+					}
 					for _, block := range msg.Content {
 						if textBlock, ok := block.(*claudecode.TextBlock); ok {
 							fmt.Printf("\nClaude: %s\n", textBlock.Text)

@@ -244,9 +244,10 @@ func (p *Parser) parseAssistantMessage(data map[string]any) (*shared.AssistantMe
 		blocks[i] = block
 	}
 
-	// Parse optional error field
+	// Parse optional error field from top-level data (not nested message object).
+	// The CLI emits {"type":"assistant","error":"rate_limit","message":{...}}.
 	var errorPtr *shared.AssistantMessageError
-	if errorStr, ok := messageData["error"].(string); ok {
+	if errorStr, ok := data["error"].(string); ok {
 		errType := shared.AssistantMessageError(errorStr)
 		errorPtr = &errType
 	}

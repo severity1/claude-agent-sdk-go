@@ -1086,6 +1086,25 @@ func (m *controlMockTransport) getWriteCount() int {
 	return len(m.writtenData)
 }
 
+// waitForFirstWrite polls until the first write is available or the deadline passes.
+// Returns the parsed request and true on success, or the zero value and false on timeout.
+// Use this instead of time.Sleep + early-return to avoid flaky tests under load.
+func (m *controlMockTransport) waitForFirstWrite(deadline time.Time) (SDKControlRequest, bool) {
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		if len(m.writtenData) > 0 {
+			var req SDKControlRequest
+			if err := json.Unmarshal(m.writtenData[0], &req); err == nil {
+				m.mu.Unlock()
+				return req, true
+			}
+		}
+		m.mu.Unlock()
+		time.Sleep(5 * time.Millisecond)
+	}
+	return SDKControlRequest{}, false
+}
+
 // =============================================================================
 // Test Helpers
 // =============================================================================
@@ -2192,21 +2211,12 @@ func testGetMcpStatusConnected(t *testing.T) {
 	toolDesc := "reads a file"
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		transport.mu.Lock()
-		if len(transport.writtenData) == 0 {
-			transport.mu.Unlock()
-			return
-		}
-		var req SDKControlRequest
-		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
-			transport.mu.Unlock()
+		req, ok := transport.waitForFirstWrite(time.Now().Add(4 * time.Second))
+		if !ok {
 			return
 		}
 		// Verify the subtype on the wire matches the Python SDK exactly.
-		reqData, _ := req.Request.(map[string]any)
-		transport.mu.Unlock()
-		if reqData != nil {
+		if reqData, _ := req.Request.(map[string]any); reqData != nil {
 			assertControlEqual(t, SubtypeGetMcpStatus, reqData["subtype"])
 		}
 		transport.injectResponse(req.RequestID, map[string]any{
@@ -2267,18 +2277,10 @@ func testGetMcpStatusFailed(t *testing.T) {
 	errMsg := "connection refused"
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		transport.mu.Lock()
-		if len(transport.writtenData) == 0 {
-			transport.mu.Unlock()
+		req, ok := transport.waitForFirstWrite(time.Now().Add(4 * time.Second))
+		if !ok {
 			return
 		}
-		var req SDKControlRequest
-		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
-			transport.mu.Unlock()
-			return
-		}
-		transport.mu.Unlock()
 		transport.injectResponse(req.RequestID, map[string]any{
 			"mcpServers": []any{
 				map[string]any{
@@ -2317,18 +2319,10 @@ func testGetMcpStatusServerInfo(t *testing.T) {
 	defer func() { _ = protocol.Close() }()
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		transport.mu.Lock()
-		if len(transport.writtenData) == 0 {
-			transport.mu.Unlock()
+		req, ok := transport.waitForFirstWrite(time.Now().Add(4 * time.Second))
+		if !ok {
 			return
 		}
-		var req SDKControlRequest
-		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
-			transport.mu.Unlock()
-			return
-		}
-		transport.mu.Unlock()
 		transport.injectResponse(req.RequestID, map[string]any{
 			"mcpServers": []any{
 				map[string]any{
@@ -2371,18 +2365,10 @@ func testGetMcpStatusToolAnnotations(t *testing.T) {
 	defer func() { _ = protocol.Close() }()
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		transport.mu.Lock()
-		if len(transport.writtenData) == 0 {
-			transport.mu.Unlock()
+		req, ok := transport.waitForFirstWrite(time.Now().Add(4 * time.Second))
+		if !ok {
 			return
 		}
-		var req SDKControlRequest
-		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
-			transport.mu.Unlock()
-			return
-		}
-		transport.mu.Unlock()
 		transport.injectResponse(req.RequestID, map[string]any{
 			"mcpServers": []any{
 				map[string]any{
@@ -2443,18 +2429,10 @@ func testGetMcpStatusConfig(t *testing.T) {
 
 	cmd := "npx"
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		transport.mu.Lock()
-		if len(transport.writtenData) == 0 {
-			transport.mu.Unlock()
+		req, ok := transport.waitForFirstWrite(time.Now().Add(4 * time.Second))
+		if !ok {
 			return
 		}
-		var req SDKControlRequest
-		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
-			transport.mu.Unlock()
-			return
-		}
-		transport.mu.Unlock()
 		transport.injectResponse(req.RequestID, map[string]any{
 			"mcpServers": []any{
 				map[string]any{
@@ -2502,18 +2480,10 @@ func testGetMcpStatusMultiple(t *testing.T) {
 	defer func() { _ = protocol.Close() }()
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		transport.mu.Lock()
-		if len(transport.writtenData) == 0 {
-			transport.mu.Unlock()
+		req, ok := transport.waitForFirstWrite(time.Now().Add(4 * time.Second))
+		if !ok {
 			return
 		}
-		var req SDKControlRequest
-		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
-			transport.mu.Unlock()
-			return
-		}
-		transport.mu.Unlock()
 		transport.injectResponse(req.RequestID, map[string]any{
 			"mcpServers": []any{
 				map[string]any{"name": "server-a", "status": "connected"},
@@ -2550,18 +2520,10 @@ func testGetMcpStatusError(t *testing.T) {
 	defer func() { _ = protocol.Close() }()
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		transport.mu.Lock()
-		if len(transport.writtenData) == 0 {
-			transport.mu.Unlock()
+		req, ok := transport.waitForFirstWrite(time.Now().Add(4 * time.Second))
+		if !ok {
 			return
 		}
-		var req SDKControlRequest
-		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
-			transport.mu.Unlock()
-			return
-		}
-		transport.mu.Unlock()
 		transport.injectErrorResponse(req.RequestID, "mcp status unavailable")
 	}()
 
@@ -2611,18 +2573,10 @@ func testGetMcpStatusEmpty(t *testing.T) {
 	defer func() { _ = protocol.Close() }()
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		transport.mu.Lock()
-		if len(transport.writtenData) == 0 {
-			transport.mu.Unlock()
+		req, ok := transport.waitForFirstWrite(time.Now().Add(4 * time.Second))
+		if !ok {
 			return
 		}
-		var req SDKControlRequest
-		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
-			transport.mu.Unlock()
-			return
-		}
-		transport.mu.Unlock()
 		transport.injectResponse(req.RequestID, map[string]any{
 			"mcpServers": []any{},
 		})
@@ -2652,18 +2606,10 @@ func testGetMcpStatusMalformed(t *testing.T) {
 	defer func() { _ = protocol.Close() }()
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		transport.mu.Lock()
-		if len(transport.writtenData) == 0 {
-			transport.mu.Unlock()
+		req, ok := transport.waitForFirstWrite(time.Now().Add(4 * time.Second))
+		if !ok {
 			return
 		}
-		var req SDKControlRequest
-		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
-			transport.mu.Unlock()
-			return
-		}
-		transport.mu.Unlock()
 		// Inject mcpServers as a string instead of an array - should fail unmarshal.
 		transport.injectResponse(req.RequestID, map[string]any{
 			"mcpServers": "not-an-array",
@@ -2693,18 +2639,10 @@ func testGetMcpStatusNilResponse(t *testing.T) {
 	defer func() { _ = protocol.Close() }()
 
 	go func() {
-		time.Sleep(50 * time.Millisecond)
-		transport.mu.Lock()
-		if len(transport.writtenData) == 0 {
-			transport.mu.Unlock()
+		req, ok := transport.waitForFirstWrite(time.Now().Add(4 * time.Second))
+		if !ok {
 			return
 		}
-		var req SDKControlRequest
-		if err := json.Unmarshal(transport.writtenData[0], &req); err != nil {
-			transport.mu.Unlock()
-			return
-		}
-		transport.mu.Unlock()
 		// Inject nil response body - CLI returned success with null body.
 		transport.injectResponse(req.RequestID, nil)
 	}()

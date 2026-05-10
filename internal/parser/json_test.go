@@ -153,15 +153,16 @@ func TestParseValidMessages(t *testing.T) {
 				}
 			},
 		},
-		// Issue #23: AssistantMessage error field tests
+		// Python PR #506: error field is at the top level of the event, not nested
+		// inside data["message"]. CLI wire format: {"type":"assistant","error":"rate_limit","message":{...}}
 		{
 			name: "assistant_message_with_rate_limit_error",
 			data: map[string]any{
-				"type": "assistant",
+				"type":  "assistant",
+				"error": "rate_limit",
 				"message": map[string]any{
 					"content": []any{map[string]any{"type": "text", "text": "Rate limited"}},
 					"model":   "claude-3-sonnet",
-					"error":   "rate_limit",
 				},
 			},
 			expectedType: shared.MessageTypeAssistant,
@@ -182,11 +183,11 @@ func TestParseValidMessages(t *testing.T) {
 		{
 			name: "assistant_message_with_auth_error",
 			data: map[string]any{
-				"type": "assistant",
+				"type":  "assistant",
+				"error": "authentication_failed",
 				"message": map[string]any{
 					"content": []any{map[string]any{"type": "text", "text": "Auth failed"}},
 					"model":   "claude-3-sonnet",
-					"error":   "authentication_failed",
 				},
 			},
 			expectedType: shared.MessageTypeAssistant,
@@ -204,6 +205,80 @@ func TestParseValidMessages(t *testing.T) {
 				}
 				if am.IsRateLimited() {
 					t.Error("expected IsRateLimited() to return false for auth error")
+				}
+			},
+		},
+		{
+			name: "assistant_message_with_billing_error",
+			data: map[string]any{
+				"type":  "assistant",
+				"error": "billing_error",
+				"message": map[string]any{
+					"content": []any{map[string]any{"type": "text", "text": "Billing error"}},
+					"model":   "claude-3-sonnet",
+				},
+			},
+			expectedType: shared.MessageTypeAssistant,
+			validate: func(t *testing.T, msg shared.Message) {
+				t.Helper()
+				am := msg.(*shared.AssistantMessage)
+				if am.Error == nil {
+					t.Fatal("expected Error to be set, got nil")
+				}
+				if *am.Error != shared.AssistantMessageErrorBilling {
+					t.Errorf("expected Error 'billing_error', got %v", *am.Error)
+				}
+				if !am.HasError() {
+					t.Error("expected HasError() to return true")
+				}
+				if am.IsRateLimited() {
+					t.Error("expected IsRateLimited() to return false for billing error")
+				}
+			},
+		},
+		{
+			name: "assistant_message_with_server_error",
+			data: map[string]any{
+				"type":  "assistant",
+				"error": "server_error",
+				"message": map[string]any{
+					"content": []any{map[string]any{"type": "text", "text": "Server error"}},
+					"model":   "claude-3-sonnet",
+				},
+			},
+			expectedType: shared.MessageTypeAssistant,
+			validate: func(t *testing.T, msg shared.Message) {
+				t.Helper()
+				am := msg.(*shared.AssistantMessage)
+				if am.Error == nil {
+					t.Fatal("expected Error to be set, got nil")
+				}
+				if *am.Error != shared.AssistantMessageErrorServer {
+					t.Errorf("expected Error 'server_error', got %v", *am.Error)
+				}
+				if !am.HasError() {
+					t.Error("expected HasError() to return true")
+				}
+			},
+		},
+		{
+			name: "assistant_message_error_in_nested_message_ignored",
+			// Regression: error inside data["message"] must NOT be picked up.
+			// Only top-level data["error"] is the wire format.
+			data: map[string]any{
+				"type": "assistant",
+				"message": map[string]any{
+					"content": []any{map[string]any{"type": "text", "text": "ok"}},
+					"model":   "claude-3-sonnet",
+					"error":   "rate_limit",
+				},
+			},
+			expectedType: shared.MessageTypeAssistant,
+			validate: func(t *testing.T, msg shared.Message) {
+				t.Helper()
+				am := msg.(*shared.AssistantMessage)
+				if am.Error != nil {
+					t.Errorf("expected Error nil when error is nested in message object, got %v", *am.Error)
 				}
 			},
 		},

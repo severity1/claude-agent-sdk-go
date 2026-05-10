@@ -428,22 +428,10 @@ func (c *ClientImpl) ReceiveResponse(_ context.Context) MessageIterator {
 		return &clientIterator{msgChan: closed, errChan: make(chan error)}
 	}
 
-	// Fan-in transport errors and QueryStream errors into one channel for the iterator.
-	mergedErr := make(chan error, 2)
-	go func() {
-		for err := range errChan {
-			mergedErr <- err
-		}
-	}()
-	go func() {
-		for err := range streamErrChan {
-			mergedErr <- err
-		}
-	}()
-
 	return &clientIterator{
-		msgChan: msgChan,
-		errChan: mergedErr,
+		msgChan:       msgChan,
+		errChan:       errChan,
+		streamErrChan: streamErrChan,
 	}
 }
 
@@ -581,10 +569,11 @@ func (c *ClientImpl) GetMcpStatus(ctx context.Context) (*McpStatusResponse, erro
 
 // clientIterator implements MessageIterator for client message reception
 type clientIterator struct {
-	msgChan <-chan Message
-	errChan <-chan error
-	mu      sync.Mutex
-	closed  bool
+	msgChan       <-chan Message
+	errChan       <-chan error
+	streamErrChan <-chan error
+	mu            sync.Mutex
+	closed        bool
 }
 
 func (ci *clientIterator) Next(ctx context.Context) (Message, error) {
@@ -605,6 +594,11 @@ func (ci *clientIterator) Next(ctx context.Context) (Message, error) {
 		}
 		return msg, nil
 	case err := <-ci.errChan:
+		ci.mu.Lock()
+		ci.closed = true
+		ci.mu.Unlock()
+		return nil, err
+	case err := <-ci.streamErrChan:
 		ci.mu.Lock()
 		ci.closed = true
 		ci.mu.Unlock()

@@ -386,7 +386,9 @@ func (p *Protocol) sendErrorResponse(ctx context.Context, requestID string, errM
 
 // Initialize performs the control protocol handshake with the CLI.
 // This must be called in streaming mode before other control operations.
-// The result is cached - concurrent and subsequent calls return the cached response.
+// The result is cached via sync.Once - concurrent and subsequent calls return the cached
+// response. If the first call fails, the error is also cached permanently; subsequent
+// calls return the same error and will not retry even with a fresh context.
 func (p *Protocol) Initialize(ctx context.Context) (*InitializeResponse, error) {
 	p.initOnce.Do(func() {
 		// Build initialize request with hooks configuration

@@ -255,6 +255,7 @@ type CanUseToolCallback func(
 // =============================================================================
 
 // SubtypeGetMcpStatus is the control request subtype for querying MCP server status.
+// Wire value matches Python SDK: {"subtype": "mcp_status"}.
 const SubtypeGetMcpStatus = "mcp_status"
 
 // GetMcpStatusRequest requests the status of all configured MCP servers.

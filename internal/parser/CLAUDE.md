@@ -35,7 +35,7 @@ parser/
 - Type discrimination: Use `"type"` field to determine message type
 - `tool_use_result` extraction: `parseUserMessage` reads top-level `tool_use_result` map and passes it into `UserMessage.ToolUseResult`
 - `parent_tool_use_id` extraction: read from top-level data (not nested `message`) for `UserMessage`, `AssistantMessage`, and `StreamEvent` - matches Python SDK placement
-- `AssistantMessage.Error` field: parsed from `messageData["error"]` as `*AssistantMessageError`; check with `HasError()` / `IsRateLimited()`
+- `AssistantMessage.Error` field: parsed from top-level `data["error"]` (not nested `data["message"]["error"]`); CLI wire format is `{"type":"assistant","error":"rate_limit","message":{...}}`; check with `HasError()` / `IsRateLimited()`
 - `ToolResultBlock.IsError`: optional field parsed as `*bool` (nil when absent)
 
 <!-- END AUTO-MANAGED -->

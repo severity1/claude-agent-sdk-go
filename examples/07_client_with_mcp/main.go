@@ -1,4 +1,5 @@
 // Package main demonstrates Client API with MCP time tools using WithClient for multi-turn time workflow.
+// Also demonstrates GetMcpStatus() to inspect MCP server connection state after connecting.
 package main
 
 import (
@@ -33,8 +34,34 @@ func main() {
 
 	// WithClient maintains context between time operations automatically
 	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
-		fmt.Println("\nConnected! Starting multi-turn time workflow...")
+		fmt.Println("\nConnected!")
 
+		// GetMcpStatus shows the connection state of all configured MCP servers.
+		// Call this after connecting to verify servers are ready before sending queries.
+		fmt.Println("\n--- MCP Server Status ---")
+		status, err := client.GetMcpStatus(ctx)
+		if err != nil {
+			fmt.Printf("  GetMcpStatus error: %v\n", err)
+		} else {
+			for _, srv := range status.McpServers {
+				fmt.Printf("  Server: %s  Status: %s\n", srv.Name, srv.Status)
+				if srv.Error != nil {
+					fmt.Printf("    Error: %s\n", *srv.Error)
+				}
+				if srv.ServerInfo != nil {
+					fmt.Printf("    Version: %s\n", srv.ServerInfo.Version)
+				}
+				for _, tool := range srv.Tools {
+					desc := ""
+					if tool.Description != nil {
+						desc = *tool.Description
+					}
+					fmt.Printf("    Tool: %s  %s\n", tool.Name, desc)
+				}
+			}
+		}
+
+		fmt.Println("\nStarting multi-turn time workflow...")
 		for i, step := range steps {
 			fmt.Printf("\n--- Step %d ---\n", i+1)
 			fmt.Printf("Query: %s\n", step)

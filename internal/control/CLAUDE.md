@@ -43,7 +43,7 @@ control/
 - Hook registration: `RegisterHook()` returns callback ID for later removal
 - Init error channel: `initErrChan chan error` (buffered, size 1) in Protocol struct; `HandleControlInitErr()` sends non-blocking to unblock `SendControlRequest()` when CLI fails before handshake (e.g., invalid session ID)
 - Constructor pattern: `NewGetMcpStatusRequest()` sets `Subtype: SubtypeGetMcpStatus`; follows same pattern as `NewPermissionResultAllow/Deny`; use constructors for request types with fixed subtype values
-- SubtypeGetMcpStatus = `"mcp_status"` (not `"get_mcp_status"`); included in parity table in `testSubtypeConstants`
+- SubtypeGetMcpStatus = `"mcp_status"` (wire value from Python SDK query.py); included in parity table in `testSubtypeConstants`
 - McpServerConfigType constants: `McpServerConfigTypeStdio/SSE/HTTP/SDK/ClaudeAI` discriminate `McpServerStatusConfig.Type`
 - McpServerStatus conditional fields: `ServerInfo` non-nil only when connected; `Error` non-nil only when failed; `Tools` populated only when connected
 
