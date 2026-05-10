@@ -38,8 +38,7 @@ shared/
 
 **AssistantMessage error field**:
 - `Error *AssistantMessageError`: typed string parsed from top-level `data["error"]` (not nested `data["message"]["error"]`)
-- Python SDK parity constants: `AssistantMessageErrorRateLimit="rate_limit"`, `AssistantMessageErrorBilling="billing_error"`, `AssistantMessageErrorServer="server_error"`
-- Go SDK extension constants: `AssistantMessageErrorAuthFailed="authentication_failed"`, `AssistantMessageErrorInvalidRequest="invalid_request"`, `AssistantMessageErrorUnknown="unknown"`
+- Python SDK parity constants (all six values from `types.py` `AssistantMessageError` Literal): `AssistantMessageErrorAuthFailed="authentication_failed"`, `AssistantMessageErrorBilling="billing_error"`, `AssistantMessageErrorRateLimit="rate_limit"`, `AssistantMessageErrorInvalidRequest="invalid_request"`, `AssistantMessageErrorServer="server_error"`, `AssistantMessageErrorUnknown="unknown"`
 - Helper methods: `HasError()`, `GetError()`, `IsRateLimited()`
 
 <!-- END AUTO-MANAGED -->

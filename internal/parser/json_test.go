@@ -262,6 +262,56 @@ func TestParseValidMessages(t *testing.T) {
 			},
 		},
 		{
+			name: "assistant_message_with_invalid_request_error",
+			data: map[string]any{
+				"type":  "assistant",
+				"error": "invalid_request",
+				"message": map[string]any{
+					"content": []any{map[string]any{"type": "text", "text": "Invalid request"}},
+					"model":   "claude-3-sonnet",
+				},
+			},
+			expectedType: shared.MessageTypeAssistant,
+			validate: func(t *testing.T, msg shared.Message) {
+				t.Helper()
+				am := msg.(*shared.AssistantMessage)
+				if am.Error == nil {
+					t.Fatal("expected Error to be set, got nil")
+				}
+				if *am.Error != shared.AssistantMessageErrorInvalidRequest {
+					t.Errorf("expected Error 'invalid_request', got %v", *am.Error)
+				}
+				if !am.HasError() {
+					t.Error("expected HasError() to return true")
+				}
+			},
+		},
+		{
+			name: "assistant_message_with_unknown_error",
+			data: map[string]any{
+				"type":  "assistant",
+				"error": "unknown",
+				"message": map[string]any{
+					"content": []any{map[string]any{"type": "text", "text": "Unknown error"}},
+					"model":   "claude-3-sonnet",
+				},
+			},
+			expectedType: shared.MessageTypeAssistant,
+			validate: func(t *testing.T, msg shared.Message) {
+				t.Helper()
+				am := msg.(*shared.AssistantMessage)
+				if am.Error == nil {
+					t.Fatal("expected Error to be set, got nil")
+				}
+				if *am.Error != shared.AssistantMessageErrorUnknown {
+					t.Errorf("expected Error 'unknown', got %v", *am.Error)
+				}
+				if !am.HasError() {
+					t.Error("expected HasError() to return true")
+				}
+			},
+		},
+		{
 			name: "assistant_message_error_in_nested_message_ignored",
 			// Regression: error inside data["message"] must NOT be picked up.
 			// Only top-level data["error"] is the wire format.

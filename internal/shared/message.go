@@ -31,10 +31,9 @@ const (
 type AssistantMessageError string
 
 // AssistantMessageError constants for error type identification.
-// Python SDK parity values (from types.py AssistantMessageError Literal):
-//   rate_limit, billing_error, server_error
-// Go SDK extensions (not in Python SDK - may appear from newer CLI versions):
-//   authentication_failed, invalid_request, unknown
+// Matches Python SDK Literal values from types.py (AssistantMessageError):
+// authentication_failed, billing_error, rate_limit, invalid_request,
+// server_error, unknown.
 const (
 	AssistantMessageErrorAuthFailed     AssistantMessageError = "authentication_failed"
 	AssistantMessageErrorBilling        AssistantMessageError = "billing_error"
