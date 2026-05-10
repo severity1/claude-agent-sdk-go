@@ -89,7 +89,7 @@ make ci                           # Run full CI pipeline locally
 - **Error handling**: Use `fmt.Errorf` with `%w` verb for wrapping, include contextual information
 - **Context-first**: All blocking functions accept `context.Context` as first parameter
 - **JSON handling**: Custom `UnmarshalJSON` for union types, discriminate on `"type"` field
-- **Cyclomatic complexity**: Keep functions under complexity 15 (measured by gocyclo); higher acceptable for table-driven tests, examples, orchestration code
+- **Cyclomatic complexity**: Keep functions under complexity 15 (measured by gocyclo); use `//nolint:gocyclo` on large table-driven test functions that legitimately exceed the threshold; higher complexity acceptable for table-driven tests, examples, orchestration code
 - **Naming patterns**: Interfaces describe behavior, implementations use concrete names, options use `WithXxx()`, errors use `XxxError` suffix
 - **No unnecessary exports**: Keep identifiers unexported unless needed by external consumers
 
