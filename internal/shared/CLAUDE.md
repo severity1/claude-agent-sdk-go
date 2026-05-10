@@ -36,6 +36,12 @@ shared/
 - `UUID`, `ParentToolUseID`: optional string pointers
 - `ToolUseResult map[string]any`: rich edit metadata (filePath, structuredPatch, diffs); use `HasToolUseResult()` / `GetToolUseResult()`
 
+**AssistantMessage error field**:
+- `Error *AssistantMessageError`: typed string parsed from top-level `data["error"]` (not nested `data["message"]["error"]`)
+- Python SDK parity constants: `AssistantMessageErrorRateLimit="rate_limit"`, `AssistantMessageErrorBilling="billing_error"`, `AssistantMessageErrorServer="server_error"`
+- Go SDK extension constants: `AssistantMessageErrorAuthFailed="authentication_failed"`, `AssistantMessageErrorInvalidRequest="invalid_request"`, `AssistantMessageErrorUnknown="unknown"`
+- Helper methods: `HasError()`, `GetError()`, `IsRateLimited()`
+
 <!-- END AUTO-MANAGED -->
 
 <!-- AUTO-MANAGED: conventions -->

@@ -107,7 +107,7 @@ make ci                           # Run full CI pipeline locally
 - **Benchmark tests**: Use `var sink any` to prevent dead code elimination, always call `b.ReportAllocs()` and `b.ResetTimer()`
 - **tool_use_result metadata**: `UserMessage.ToolUseResult` carries rich edit info (filePath, structuredPatch, diffs); check with `HasToolUseResult()` before accessing via `GetToolUseResult()`
 - **parent_tool_use_id placement**: parsed from top-level JSON data (not nested `message` object) for `UserMessage`, `AssistantMessage`, and `StreamEvent`; identifies messages produced inside a subagent (Agent/Task tool)
-- **AssistantMessage error field**: `AssistantMessage.Error` is `*AssistantMessageError` parsed from top-level `data["error"]` (not nested `data["message"]["error"]`); CLI wire format is `{"type":"assistant","error":"rate_limit","message":{...}}`; use `HasError()` to check presence, `IsRateLimited()` for rate limit specifically
+- **AssistantMessage error field**: `AssistantMessage.Error` is `*AssistantMessageError` parsed from top-level `data["error"]` (not nested `data["message"]["error"]`); CLI wire format is `{"type":"assistant","error":"rate_limit","message":{...}}`; use `HasError()` to check presence, `IsRateLimited()` for rate limit specifically; `AssistantMessageError` constants: `rate_limit`, `billing_error`, `server_error` (Python SDK parity); `authentication_failed`, `invalid_request`, `unknown` (Go SDK extensions)
 - **Init error routing**: `subprocess.routeInitError()` detects error `ResultMessage` arriving before transport is connected and calls `protocol.HandleControlInitErr()` to unblock `SendControlRequest()` via `initErrChan`
 - **Control protocol delegation**: `SetModel()`, `SetPermissionMode()`, `RewindFiles()`, `GetMcpStatus()` all guard with `t.connected && !t.closeStdin` before delegating to `t.protocol`; nil protocol guard uses descriptive error `"internal error: transport connected but control protocol is nil"`
 - **MCP config serialization**: `generateMcpConfigFile()` strips Go `Instance` field from SDK servers and propagates `AlwaysLoad` explicitly (not via struct json tags) when building CLI config
@@ -131,7 +131,7 @@ make ci                           # Run full CI pipeline locally
 - Recent focus: AssistantMessage error object form (Python PR #506, feature/phase1-1); GetMcpStatus() control protocol method (Python PR #516, Go PR #124); AlwaysLoad propagation for MCP server configs (Issue #119); init error handling in control protocol (Issue #110)
 - Benchmark organization: Table-driven benchmarks across all core modules (options, parser, shared, control, cli)
 - Makefile integration: All code quality checks (fmt, vet, lint, cyclo) unified under `make check`
-- Python SDK parity tracking: `docs/tracking/README.md` tracks all Python SDK PRs to port; organized into 4 chronological phases (Phase 1: Jan 26-Feb 20, Phase 2: Mar 3-Mar 16, Phase 3: Mar 20-Mar 30, Phase 4: Mar 31-Apr 8); last ported features: GetMcpStatus (Go PR #124, Python PR #516), AlwaysLoad MCP config (Go PR #120, Issue #119)
+- Python SDK parity tracking: `docs/tracking/README.md` tracks all Python SDK PRs to port; organized into 4 chronological phases (Phase 1: Jan 26-Feb 20, Phase 2: Mar 3-Mar 16, Phase 3: Mar 20-Mar 30, Phase 4: Mar 31-Apr 8); last ported features: AssistantMessage error field fix (feature/phase1-1, Python PR #506), GetMcpStatus (Go PR #124, Python PR #516), AlwaysLoad MCP config (Go PR #120, Issue #119)
 
 <!-- END AUTO-MANAGED -->
 
