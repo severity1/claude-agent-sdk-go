@@ -18,6 +18,7 @@ func TestHookEventConstants(t *testing.T) {
 	}{
 		{"pre_tool_use", HookEventPreToolUse, "PreToolUse"},
 		{"post_tool_use", HookEventPostToolUse, "PostToolUse"},
+		{"post_tool_use_failure", HookEventPostToolUseFailure, "PostToolUseFailure"},
 		{"user_prompt_submit", HookEventUserPromptSubmit, "UserPromptSubmit"},
 		{"stop", HookEventStop, "Stop"},
 		{"subagent_stop", HookEventSubagentStop, "SubagentStop"},
@@ -34,18 +35,20 @@ func TestHookEventConstants(t *testing.T) {
 }
 
 func TestHookEventCount(t *testing.T) {
-	// Ensure we have exactly 6 hook events as per Python SDK parity
+	// Ensure we have exactly 7 hook events as per Python SDK parity
+	// (PR #535 added PostToolUseFailure; events from PR #545 land in item #4).
 	events := []HookEvent{
 		HookEventPreToolUse,
 		HookEventPostToolUse,
+		HookEventPostToolUseFailure,
 		HookEventUserPromptSubmit,
 		HookEventStop,
 		HookEventSubagentStop,
 		HookEventPreCompact,
 	}
 
-	if len(events) != 6 {
-		t.Errorf("Expected 6 hook events for Python SDK parity, got %d", len(events))
+	if len(events) != 7 {
+		t.Errorf("Expected 7 hook events for Python SDK parity, got %d", len(events))
 	}
 }
 
@@ -140,6 +143,83 @@ func TestPostToolUseHookInputSerialization(t *testing.T) {
 	assertHookJSONField(t, result, "hook_event_name", "PostToolUse")
 	assertHookJSONField(t, result, "tool_name", "Bash")
 	assertHookJSONField(t, result, "tool_response", "file1.txt\nfile2.txt")
+}
+
+func TestPostToolUseFailureHookInputSerialization(t *testing.T) {
+	isInterrupt := true
+	input := PostToolUseFailureHookInput{
+		BaseHookInput: BaseHookInput{
+			SessionID:      "session-123",
+			TranscriptPath: "/tmp/transcript.json",
+			Cwd:            "/home/user",
+		},
+		HookEventName: "PostToolUseFailure",
+		ToolName:      "Bash",
+		ToolInput:     map[string]any{"command": "ls -la"},
+		ToolUseID:     "tool_use_abc",
+		Error:         "exit status 1: command not found",
+		IsInterrupt:   &isInterrupt,
+	}
+
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("Failed to marshal PostToolUseFailureHookInput: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Failed to unmarshal to map: %v", err)
+	}
+
+	// Verify JSON field names match Python SDK (PR #535)
+	assertHookJSONField(t, result, "hook_event_name", "PostToolUseFailure")
+	assertHookJSONField(t, result, "tool_name", "Bash")
+	assertHookJSONField(t, result, "tool_use_id", "tool_use_abc")
+	assertHookJSONField(t, result, "error", "exit status 1: command not found")
+
+	toolInput, ok := result["tool_input"].(map[string]any)
+	if !ok {
+		t.Fatal("tool_input should be a map")
+		return
+	}
+	if toolInput["command"] != "ls -la" {
+		t.Errorf("tool_input.command = %v, want %q", toolInput["command"], "ls -la")
+	}
+
+	if result["is_interrupt"] != true {
+		t.Errorf("is_interrupt = %v, want true", result["is_interrupt"])
+	}
+}
+
+func TestPostToolUseFailureHookInputSerializationNilIsInterrupt(t *testing.T) {
+	input := PostToolUseFailureHookInput{
+		BaseHookInput: BaseHookInput{
+			SessionID:      "session-123",
+			TranscriptPath: "/tmp/transcript.json",
+			Cwd:            "/home/user",
+		},
+		HookEventName: "PostToolUseFailure",
+		ToolName:      "Bash",
+		ToolInput:     map[string]any{"command": "ls"},
+		ToolUseID:     "tool_use_abc",
+		Error:         "boom",
+		IsInterrupt:   nil,
+	}
+
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("Failed to marshal PostToolUseFailureHookInput: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Failed to unmarshal to map: %v", err)
+	}
+
+	// is_interrupt should be omitted when nil (Python's NotRequired[bool])
+	if _, exists := result["is_interrupt"]; exists {
+		t.Error("is_interrupt should be omitted when IsInterrupt is nil")
+	}
 }
 
 func TestUserPromptSubmitHookInputSerialization(t *testing.T) {
@@ -413,6 +493,48 @@ func TestPostToolUseHookSpecificOutputSerialization(t *testing.T) {
 
 	assertHookJSONField(t, result, "hookEventName", "PostToolUse")
 	assertHookJSONField(t, result, "additionalContext", "Tool executed with warnings")
+}
+
+func TestPostToolUseFailureHookSpecificOutputSerialization(t *testing.T) {
+	ctx := "Retry recommended due to transient error"
+	output := PostToolUseFailureHookSpecificOutput{
+		HookEventName:     "PostToolUseFailure",
+		AdditionalContext: &ctx,
+	}
+
+	data, err := json.Marshal(output)
+	if err != nil {
+		t.Fatalf("Failed to marshal PostToolUseFailureHookSpecificOutput: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Failed to unmarshal to map: %v", err)
+	}
+
+	assertHookJSONField(t, result, "hookEventName", "PostToolUseFailure")
+	assertHookJSONField(t, result, "additionalContext", "Retry recommended due to transient error")
+}
+
+func TestPostToolUseFailureHookSpecificOutputOmitEmpty(t *testing.T) {
+	output := PostToolUseFailureHookSpecificOutput{
+		HookEventName: "PostToolUseFailure",
+		// AdditionalContext deliberately nil
+	}
+
+	data, err := json.Marshal(output)
+	if err != nil {
+		t.Fatalf("Failed to marshal PostToolUseFailureHookSpecificOutput: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Failed to unmarshal to map: %v", err)
+	}
+
+	if _, exists := result["additionalContext"]; exists {
+		t.Error("additionalContext should be omitted when nil")
+	}
 }
 
 func TestUserPromptSubmitHookSpecificOutputSerialization(t *testing.T) {

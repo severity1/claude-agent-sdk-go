@@ -166,6 +166,158 @@ func TestHookCallbackHandler_PostToolUse(t *testing.T) {
 	}
 }
 
+func TestHookCallbackHandler_PostToolUseFailure(t *testing.T) {
+	ctx, cancel := setupHookTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newHookMockTransport()
+
+	var receivedInput any
+	callbackCalled := false
+
+	callback := func(
+		_ context.Context,
+		input any,
+		_ *string,
+		_ HookContext,
+	) (HookJSONOutput, error) {
+		callbackCalled = true
+		receivedInput = input
+		return HookJSONOutput{}, nil
+	}
+
+	hookCallbacks := map[string]HookCallback{
+		"hook_0": callback,
+	}
+
+	protocol := NewProtocol(transport, WithHookCallbacks(hookCallbacks))
+
+	err := protocol.Start(ctx)
+	assertHookNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	request := map[string]any{
+		"type":       MessageTypeControlRequest,
+		"request_id": "req_hook_ptuf",
+		"request": map[string]any{
+			"subtype":         SubtypeHookCallback,
+			"callback_id":     "hook_0",
+			"hook_event_name": "PostToolUseFailure",
+			"input": map[string]any{
+				"session_id":      "test-session",
+				"transcript_path": "/tmp/transcript.json",
+				"cwd":             "/home/user",
+				"hook_event_name": "PostToolUseFailure",
+				"tool_name":       "Bash",
+				"tool_input":      map[string]any{"command": "ls -la"},
+				"tool_use_id":     "tool_use_abc",
+				"error":           "exit status 1",
+				"is_interrupt":    true,
+			},
+		},
+	}
+
+	err = protocol.HandleIncomingMessage(ctx, request)
+	assertHookNoError(t, err)
+
+	if !callbackCalled {
+		t.Fatal("Expected callback to be called")
+	}
+
+	failureInput, ok := receivedInput.(*PostToolUseFailureHookInput)
+	if !ok {
+		t.Fatalf("Expected *PostToolUseFailureHookInput, got %T", receivedInput)
+		return
+	}
+
+	if failureInput.HookEventName != "PostToolUseFailure" {
+		t.Errorf("HookEventName = %q, want %q", failureInput.HookEventName, "PostToolUseFailure")
+	}
+	if failureInput.ToolName != "Bash" {
+		t.Errorf("ToolName = %q, want %q", failureInput.ToolName, "Bash")
+	}
+	if failureInput.ToolUseID != "tool_use_abc" {
+		t.Errorf("ToolUseID = %q, want %q", failureInput.ToolUseID, "tool_use_abc")
+	}
+	if failureInput.Error != "exit status 1" {
+		t.Errorf("Error = %q, want %q", failureInput.Error, "exit status 1")
+	}
+	if failureInput.IsInterrupt == nil || !*failureInput.IsInterrupt {
+		t.Errorf("IsInterrupt = %v, want pointer to true", failureInput.IsInterrupt)
+	}
+	if failureInput.ToolInput["command"] != "ls -la" {
+		t.Errorf("ToolInput[command] = %v, want %q", failureInput.ToolInput["command"], "ls -la")
+	}
+	// Base hook fields propagated
+	if failureInput.SessionID != "test-session" {
+		t.Errorf("SessionID = %q, want %q", failureInput.SessionID, "test-session")
+	}
+}
+
+func TestHookCallbackHandler_PostToolUseFailureNoInterrupt(t *testing.T) {
+	// Verifies that when the input map omits "is_interrupt", the parsed struct's
+	// IsInterrupt is nil (Python's NotRequired[bool] semantics).
+	ctx, cancel := setupHookTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newHookMockTransport()
+
+	var receivedInput any
+	callback := func(
+		_ context.Context,
+		input any,
+		_ *string,
+		_ HookContext,
+	) (HookJSONOutput, error) {
+		receivedInput = input
+		return HookJSONOutput{}, nil
+	}
+
+	hookCallbacks := map[string]HookCallback{
+		"hook_0": callback,
+	}
+
+	protocol := NewProtocol(transport, WithHookCallbacks(hookCallbacks))
+
+	err := protocol.Start(ctx)
+	assertHookNoError(t, err)
+	defer func() { _ = protocol.Close() }()
+
+	request := map[string]any{
+		"type":       MessageTypeControlRequest,
+		"request_id": "req_hook_ptuf_nointr",
+		"request": map[string]any{
+			"subtype":         SubtypeHookCallback,
+			"callback_id":     "hook_0",
+			"hook_event_name": "PostToolUseFailure",
+			"input": map[string]any{
+				"session_id":      "test-session",
+				"transcript_path": "/tmp/transcript.json",
+				"cwd":             "/home/user",
+				"hook_event_name": "PostToolUseFailure",
+				"tool_name":       "Bash",
+				"tool_input":      map[string]any{"command": "ls"},
+				"tool_use_id":     "tool_use_abc",
+				"error":           "boom",
+				// is_interrupt deliberately omitted
+			},
+		},
+	}
+
+	err = protocol.HandleIncomingMessage(ctx, request)
+	assertHookNoError(t, err)
+
+	failureInput, ok := receivedInput.(*PostToolUseFailureHookInput)
+	if !ok {
+		t.Fatalf("Expected *PostToolUseFailureHookInput, got %T", receivedInput)
+		return
+	}
+
+	if failureInput.IsInterrupt != nil {
+		t.Errorf("IsInterrupt = %v, want nil when key absent", *failureInput.IsInterrupt)
+	}
+}
+
 func TestHookCallbackHandler_BlockDecision(t *testing.T) {
 	ctx, cancel := setupHookTestContext(t, 5*time.Second)
 	defer cancel()
