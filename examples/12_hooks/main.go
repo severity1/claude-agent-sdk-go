@@ -10,6 +10,7 @@
 // Hook events supported:
 // - PreToolUse: Before a tool executes (can block or modify input)
 // - PostToolUse: After a tool executes (can add context)
+// - PostToolUseFailure: After a tool fails (can inject recovery context)
 // - UserPromptSubmit: When user submits a prompt
 // - Stop: When session is stopping
 // - SubagentStop: When a subagent is stopping
@@ -64,6 +65,13 @@ func main() {
 	fmt.Println("Hook: Add timing information after tool execution")
 	fmt.Println()
 	runContextInjectionExample()
+
+	// Example 4: Recovering from tool failures
+	fmt.Println()
+	fmt.Println("--- Example 4: Tool Failure Recovery Hook ---")
+	fmt.Println("Hook: Inject recovery context when a Bash command fails")
+	fmt.Println()
+	runFailureRecoveryExample()
 
 	fmt.Println()
 	fmt.Println("Hook system examples completed!")
@@ -318,6 +326,82 @@ func runContextInjectionExample() {
 		fmt.Printf("Error: %v\n", err)
 	}
 }
+
+// runFailureRecoveryExample demonstrates injecting recovery context after a tool failure.
+//
+// The PostToolUseFailure event fires when a tool invocation exits non-zero (Bash) or
+// otherwise reports an error. Unlike PostToolUse, it gives the hook a chance to attach
+// guidance Claude can use on its next turn - file path hints, retry advice, etc.
+//
+// User-initiated interrupts (IsInterrupt == true) are treated specially: the hook
+// stays silent rather than encouraging a retry, since Ctrl+C signals stop intent.
+func runFailureRecoveryExample() {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// PostToolUseFailure hook - inject recovery context when Bash fails.
+	// Registered via generic WithHook because no convenience helper exists for this event.
+	failureHook := claudecode.WithHook(
+		claudecode.HookEventPostToolUseFailure,
+		"Bash",
+		recoveryCallback,
+	)
+
+	fmt.Println("Asking Claude to run a Bash command that will fail...")
+
+	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
+		if err := client.Query(ctx, "Run 'cat /nonexistent-file' and tell me what happens."); err != nil {
+			return err
+		}
+		return streamResponse(ctx, client)
+	}, failureHook, claudecode.WithMaxTurns(3), claudecode.WithCwd(exampleDir()))
+
+	if err != nil {
+		if cliErr := claudecode.AsCLINotFoundError(err); cliErr != nil {
+			fmt.Printf("Claude CLI not found: %v\n", cliErr)
+			fmt.Println("Install with: npm install -g @anthropic-ai/claude-code")
+			return
+		}
+		if connErr := claudecode.AsConnectionError(err); connErr != nil {
+			fmt.Printf("Connection failed: %v\n", connErr)
+			return
+		}
+		fmt.Printf("Error: %v\n", err)
+	}
+}
+
+// recoveryCallback is the PostToolUseFailure handler for runFailureRecoveryExample.
+// Skips context injection when IsInterrupt is true to respect user stop intent.
+func recoveryCallback(
+	_ context.Context,
+	input any,
+	_ *string,
+	_ claudecode.HookContext,
+) (claudecode.HookJSONOutput, error) {
+	failInput, ok := input.(*claudecode.PostToolUseFailureHookInput)
+	if !ok {
+		return claudecode.HookJSONOutput{}, nil
+	}
+
+	if failInput.IsInterrupt != nil && *failInput.IsInterrupt {
+		fmt.Printf("  [INTERRUPT] Tool %s cancelled by user; no recovery hint injected\n",
+			failInput.ToolName)
+		return claudecode.HookJSONOutput{}, nil
+	}
+
+	fmt.Printf("  [RECOVERY] Tool %s failed: %s\n",
+		failInput.ToolName, truncate(failInput.Error, 80))
+
+	return claudecode.HookJSONOutput{
+		HookSpecificOutput: claudecode.PostToolUseFailureHookSpecificOutput{
+			HookEventName:     "PostToolUseFailure",
+			AdditionalContext: ptrTo("The previous command failed. Verify the file path exists before retrying, or try a different approach."),
+		},
+	}, nil
+}
+
+// ptrTo returns a pointer to the given value. Useful for *string fields like AdditionalContext.
+func ptrTo[T any](v T) *T { return &v }
 
 // ToolLogEntry represents a logged tool usage event
 type ToolLogEntry struct {
