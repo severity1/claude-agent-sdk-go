@@ -155,7 +155,7 @@ func TestPostToolUseFailureHookInputSerialization(t *testing.T) {
 		},
 		HookEventName: "PostToolUseFailure",
 		ToolName:      "Bash",
-		ToolInput:     map[string]any{"command": "ls -la"},
+		ToolInput:     map[string]any{"command": "sleep 60"},
 		ToolUseID:     "tool_use_abc",
 		Error:         "exit status 1: command not found",
 		IsInterrupt:   &isInterrupt,
@@ -182,8 +182,8 @@ func TestPostToolUseFailureHookInputSerialization(t *testing.T) {
 		t.Fatal("tool_input should be a map")
 		return
 	}
-	if toolInput["command"] != "ls -la" {
-		t.Errorf("tool_input.command = %v, want %q", toolInput["command"], "ls -la")
+	if toolInput["command"] != "sleep 60" {
+		t.Errorf("tool_input.command = %v, want %q", toolInput["command"], "sleep 60")
 	}
 
 	if result["is_interrupt"] != true {
