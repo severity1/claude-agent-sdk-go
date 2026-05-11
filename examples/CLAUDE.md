@@ -23,7 +23,7 @@ examples/
 ├── 09_context_manager/      # WithClient pattern
 ├── 10_session_management/   # Session isolation
 ├── 11_permission_callback/  # Tool permission control
-├── 12_hooks/                # Lifecycle hooks
+├── 12_hooks/                # Lifecycle hooks; PreToolUse logging, command blocking, PostToolUse context injection, PostToolUseFailure recovery via WithHook()
 ├── 13_file_checkpointing/   # File rewind capabilities
 ├── 14_sdk_mcp_server/       # In-process custom tools
 ├── 15_programmatic_subagents/ # Agent definitions
