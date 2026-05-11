@@ -363,7 +363,7 @@ func TestPreCompactHookInputSerializationNilCustomInstructions(t *testing.T) {
 
 func TestHookJSONOutputSerialization(t *testing.T) {
 	continueVal := true
-	decision := "block" //nolint:goconst // test value - no benefit from constant
+	decision := testDecisionBlock
 	systemMessage := "Tool blocked"
 	reason := "Security policy"
 
