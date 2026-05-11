@@ -664,6 +664,8 @@ const (
 	HookEventPreToolUse = control.HookEventPreToolUse
 	// HookEventPostToolUse is triggered after a tool is executed.
 	HookEventPostToolUse = control.HookEventPostToolUse
+	// HookEventPostToolUseFailure is triggered after a tool execution fails.
+	HookEventPostToolUseFailure = control.HookEventPostToolUseFailure
 	// HookEventUserPromptSubmit is triggered when a user submits a prompt.
 	HookEventUserPromptSubmit = control.HookEventUserPromptSubmit
 	// HookEventStop is triggered when the session is stopping.
@@ -672,8 +674,6 @@ const (
 	HookEventSubagentStop = control.HookEventSubagentStop
 	// HookEventPreCompact is triggered before context compaction.
 	HookEventPreCompact = control.HookEventPreCompact
-	// HookEventPostToolUseFailure is triggered after a tool execution fails.
-	HookEventPostToolUseFailure = control.HookEventPostToolUseFailure
 )
 
 // HookCallback is the function signature for hook callbacks.
@@ -699,6 +699,8 @@ type (
 	PreToolUseHookInput = control.PreToolUseHookInput
 	// PostToolUseHookInput is the input for PostToolUse hook events.
 	PostToolUseHookInput = control.PostToolUseHookInput
+	// PostToolUseFailureHookInput is the input for PostToolUseFailure hook events.
+	PostToolUseFailureHookInput = control.PostToolUseFailureHookInput
 	// UserPromptSubmitHookInput is the input for UserPromptSubmit hook events.
 	UserPromptSubmitHookInput = control.UserPromptSubmitHookInput
 	// StopHookInput is the input for Stop hook events.
@@ -707,8 +709,6 @@ type (
 	SubagentStopHookInput = control.SubagentStopHookInput
 	// PreCompactHookInput is the input for PreCompact hook events.
 	PreCompactHookInput = control.PreCompactHookInput
-	// PostToolUseFailureHookInput is the input for PostToolUseFailure hook events.
-	PostToolUseFailureHookInput = control.PostToolUseFailureHookInput
 )
 
 // PreToolUseHookSpecificOutput and related types contain hook-specific output fields.
@@ -717,10 +717,10 @@ type (
 	PreToolUseHookSpecificOutput = control.PreToolUseHookSpecificOutput
 	// PostToolUseHookSpecificOutput contains PostToolUse-specific output fields.
 	PostToolUseHookSpecificOutput = control.PostToolUseHookSpecificOutput
-	// UserPromptSubmitHookSpecificOutput contains UserPromptSubmit-specific output fields.
-	UserPromptSubmitHookSpecificOutput = control.UserPromptSubmitHookSpecificOutput
 	// PostToolUseFailureHookSpecificOutput contains PostToolUseFailure-specific output fields.
 	PostToolUseFailureHookSpecificOutput = control.PostToolUseFailureHookSpecificOutput
+	// UserPromptSubmitHookSpecificOutput contains UserPromptSubmit-specific output fields.
+	UserPromptSubmitHookSpecificOutput = control.UserPromptSubmitHookSpecificOutput
 )
 
 // =============================================================================

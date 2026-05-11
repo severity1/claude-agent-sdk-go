@@ -17,6 +17,9 @@ const (
 	HookEventPreToolUse HookEvent = "PreToolUse"
 	// HookEventPostToolUse is triggered after a tool is executed.
 	HookEventPostToolUse HookEvent = "PostToolUse"
+	// HookEventPostToolUseFailure is triggered after a tool execution fails.
+	// Distinct from PostToolUse, which fires on success. Added in Python SDK PR #535.
+	HookEventPostToolUseFailure HookEvent = "PostToolUseFailure"
 	// HookEventUserPromptSubmit is triggered when a user submits a prompt.
 	HookEventUserPromptSubmit HookEvent = "UserPromptSubmit"
 	// HookEventStop is triggered when the session is stopping.
@@ -25,9 +28,6 @@ const (
 	HookEventSubagentStop HookEvent = "SubagentStop"
 	// HookEventPreCompact is triggered before context compaction.
 	HookEventPreCompact HookEvent = "PreCompact"
-	// HookEventPostToolUseFailure is triggered after a tool execution fails.
-	// Distinct from PostToolUse, which fires on success. Added in Python SDK PR #535.
-	HookEventPostToolUseFailure HookEvent = "PostToolUseFailure"
 )
 
 // =============================================================================
