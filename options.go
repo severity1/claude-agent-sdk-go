@@ -672,6 +672,8 @@ const (
 	HookEventSubagentStop = control.HookEventSubagentStop
 	// HookEventPreCompact is triggered before context compaction.
 	HookEventPreCompact = control.HookEventPreCompact
+	// HookEventPostToolUseFailure is triggered after a tool execution fails.
+	HookEventPostToolUseFailure = control.HookEventPostToolUseFailure
 )
 
 // HookCallback is the function signature for hook callbacks.
@@ -705,6 +707,8 @@ type (
 	SubagentStopHookInput = control.SubagentStopHookInput
 	// PreCompactHookInput is the input for PreCompact hook events.
 	PreCompactHookInput = control.PreCompactHookInput
+	// PostToolUseFailureHookInput is the input for PostToolUseFailure hook events.
+	PostToolUseFailureHookInput = control.PostToolUseFailureHookInput
 )
 
 // PreToolUseHookSpecificOutput and related types contain hook-specific output fields.
@@ -715,6 +719,8 @@ type (
 	PostToolUseHookSpecificOutput = control.PostToolUseHookSpecificOutput
 	// UserPromptSubmitHookSpecificOutput contains UserPromptSubmit-specific output fields.
 	UserPromptSubmitHookSpecificOutput = control.UserPromptSubmitHookSpecificOutput
+	// PostToolUseFailureHookSpecificOutput contains PostToolUseFailure-specific output fields.
+	PostToolUseFailureHookSpecificOutput = control.PostToolUseFailureHookSpecificOutput
 )
 
 // =============================================================================

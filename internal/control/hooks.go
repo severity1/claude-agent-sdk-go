@@ -93,6 +93,16 @@ func (p *Protocol) parseHookInput(event HookEvent, inputData map[string]any) any
 			ToolInput:     getMap(inputData, "tool_input"),
 			ToolResponse:  inputData["tool_response"],
 		}
+	case HookEventPostToolUseFailure:
+		return &PostToolUseFailureHookInput{
+			BaseHookInput: base,
+			HookEventName: "PostToolUseFailure",
+			ToolName:      getString(inputData, "tool_name"),
+			ToolInput:     getMap(inputData, "tool_input"),
+			ToolUseID:     getString(inputData, "tool_use_id"),
+			Error:         getString(inputData, "error"),
+			IsInterrupt:   getBoolPtr(inputData, "is_interrupt"),
+		}
 	case HookEventUserPromptSubmit:
 		return &UserPromptSubmitHookInput{
 			BaseHookInput: base,
@@ -275,6 +285,13 @@ func getBool(m map[string]any, key string) bool {
 		return v
 	}
 	return false
+}
+
+func getBoolPtr(m map[string]any, key string) *bool {
+	if v, ok := m[key].(bool); ok {
+		return &v
+	}
+	return nil
 }
 
 func getMap(m map[string]any, key string) map[string]any {
