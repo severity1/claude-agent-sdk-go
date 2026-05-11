@@ -75,6 +75,8 @@ type PostToolUseHookInput struct {
 
 // PostToolUseFailureHookInput is the input for PostToolUseFailure hook events.
 // Matches Python SDK's PostToolUseFailureHookInput TypedDict (PR #535).
+// _SubagentContextMixin fields (agent_id/agent_type) deferred to Phase 1 item #4
+// (Python PR #545) so all tool-lifecycle inputs gain agent fields together.
 type PostToolUseFailureHookInput struct {
 	BaseHookInput
 	// HookEventName is always "PostToolUseFailure".
@@ -162,6 +164,7 @@ type PostToolUseHookSpecificOutput struct {
 
 // PostToolUseFailureHookSpecificOutput contains PostToolUseFailure-specific output fields.
 // Matches Python SDK's PostToolUseFailureHookSpecificOutput TypedDict (PR #535).
+// Structurally identical to PostToolUseHookSpecificOutput; only the HookEventName literal differs.
 type PostToolUseFailureHookSpecificOutput struct {
 	// HookEventName is always "PostToolUseFailure".
 	HookEventName string `json:"hookEventName"`
