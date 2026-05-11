@@ -46,6 +46,8 @@ control/
 - SubtypeGetMcpStatus = `"mcp_status"` (wire value from Python SDK query.py); included in parity table in `testSubtypeConstants`
 - McpServerConfigType constants: `McpServerConfigTypeStdio/SSE/HTTP/SDK/ClaudeAI` discriminate `McpServerStatusConfig.Type`
 - McpServerStatus conditional fields: `ServerInfo` non-nil only when connected; `Error` non-nil only when failed; `Tools` populated only when connected
+- Hook event count: 7 as of Python SDK PR #535 (`HookEventPostToolUseFailure = "PostToolUseFailure"` added); next events (PR #545) land in Phase1 item #4
+- PostToolUseFailureHookInput fields: `ToolUseID string`, `Error string`, `IsInterrupt *bool json:"is_interrupt,omitempty"`; nil `IsInterrupt` maps to key absent in JSON (Python `NotRequired[bool]`); `PostToolUseFailureHookSpecificOutput` mirrors `PostToolUseHookSpecificOutput` with `AdditionalContext *string` (omitempty)
 
 <!-- END AUTO-MANAGED -->
 
