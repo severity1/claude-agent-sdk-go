@@ -333,8 +333,10 @@ func runContextInjectionExample() {
 // otherwise reports an error. Unlike PostToolUse, it gives the hook a chance to attach
 // guidance Claude can use on its next turn - file path hints, retry advice, etc.
 //
-// User-initiated interrupts (IsInterrupt == true) are treated specially: the hook
-// stays silent rather than encouraging a retry, since Ctrl+C signals stop intent.
+// User-initiated interrupts (IsInterrupt non-nil and dereferences to true) are
+// treated specially: the hook stays silent rather than encouraging a retry, since
+// Ctrl+C signals stop intent. A nil IsInterrupt means the CLI omitted the field
+// (Python NotRequired[bool] semantics) and must not be treated as an interrupt.
 func runFailureRecoveryExample() {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
