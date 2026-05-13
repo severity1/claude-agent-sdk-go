@@ -135,7 +135,7 @@ make ci                           # Run full CI pipeline locally
 - Recent focus: PostToolUseFailure hook event (Python PR #535, Phase1 item #2) - includes const block reorder to match Python ordering and _SubagentContextMixin deferral to Phase2 item #13 (Python PR #628); AssistantMessage error object form (Python PR #506, feature/phase1-1); GetMcpStatus() control protocol method (Python PR #516, Go PR #124); AlwaysLoad propagation for MCP server configs (Issue #119)
 - Benchmark organization: Table-driven benchmarks across all core modules (options, parser, shared, control, cli)
 - Makefile integration: All code quality checks (fmt, vet, lint, cyclo) unified under `make check`
-- Python SDK parity tracking: `docs/tracking/README.md` tracks all Python SDK PRs to port; organized into 4 chronological phases (Phase 1: Jan 26-Feb 20, Phase 2: Mar 3-Mar 16, Phase 3: Mar 20-Mar 30, Phase 4: Mar 31-Apr 8); last ported features: PostToolUseFailure hook (Phase1 item #2, Python PR #535), AssistantMessage error field fix (feature/phase1-1, Python PR #506), GetMcpStatus (Go PR #124, Python PR #516), AlwaysLoad MCP config (Go PR #120, Issue #119)
+- Python SDK parity tracking: `docs/tracking/README.md` tracks all Python SDK PRs to port; organized into 4 chronological phases (Phase 1: Jan 26-Feb 20, Phase 2: Mar 3-Mar 16, Phase 3: Mar 20-Mar 30, Phase 4: Mar 31-Apr 8); Phase 1 items done: #1 GetMcpStatus (Go PR #124, Python PR #516), #2 PostToolUseFailure hook (Go PR #125, Python PR #535), #3 AssistantMessage error field fix (Go PR #124 squash, Python PR #506); next pending: Phase1 item #4 (Python PR #545, 3 new hook events + missing fields); Phase3 item #35 done (Go PR #114, Python PR #749)
 
 <!-- END AUTO-MANAGED -->
 
