@@ -196,7 +196,19 @@ func addToolsFlag(cmd []string, options *shared.Options) []string {
 
 func addModelAndPromptFlags(cmd []string, options *shared.Options) []string {
 	if options.SystemPrompt != nil {
-		cmd = append(cmd, "--system-prompt", *options.SystemPrompt)
+		switch v := options.SystemPrompt.(type) {
+		case string:
+			cmd = append(cmd, "--system-prompt", v)
+		case *string:
+			// Support pointer for backwards compatibility
+			cmd = append(cmd, "--system-prompt", *v)
+		case shared.SystemPromptPreset:
+			// For presets, only add --append-system-prompt with the append text
+			// The preset itself is handled by the CLI's default behavior
+			if v.Append != "" {
+				cmd = append(cmd, "--append-system-prompt", v.Append)
+			}
+		}
 	}
 	if options.AppendSystemPrompt != nil {
 		cmd = append(cmd, "--append-system-prompt", *options.AppendSystemPrompt)

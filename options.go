@@ -36,6 +36,9 @@ type SdkBeta = shared.SdkBeta
 // ToolsPreset represents a preset tools configuration.
 type ToolsPreset = shared.ToolsPreset
 
+// SystemPromptPreset represents a preset system prompt configuration.
+type SystemPromptPreset = shared.SystemPromptPreset
+
 // SettingSource represents a settings source location.
 type SettingSource = shared.SettingSource
 
@@ -157,11 +160,30 @@ func WithClaudeCodeTools() Option {
 	return WithToolsPreset("claude_code")
 }
 
-// WithSystemPrompt sets the system prompt.
+// WithSystemPrompt sets the system prompt as a string.
 func WithSystemPrompt(prompt string) Option {
 	return func(o *Options) {
-		o.SystemPrompt = &prompt
+		o.SystemPrompt = prompt
 	}
+}
+
+// WithSystemPromptPreset sets the system prompt to use a preset configuration.
+// The preset parameter specifies the preset name (e.g., "claude_code").
+// The appendText parameter optionally adds text after the preset prompt.
+func WithSystemPromptPreset(preset, appendText string) Option {
+	return func(o *Options) {
+		o.SystemPrompt = SystemPromptPreset{
+			Type:   "preset",
+			Preset: preset,
+			Append: appendText,
+		}
+	}
+}
+
+// WithClaudeCodeSystemPrompt sets the system prompt to the claude_code preset.
+// The appendText parameter optionally adds text after the preset prompt.
+func WithClaudeCodeSystemPrompt(appendText string) Option {
+	return WithSystemPromptPreset("claude_code", appendText)
 }
 
 // WithAppendSystemPrompt sets the append system prompt.

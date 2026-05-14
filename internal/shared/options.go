@@ -40,6 +40,14 @@ type ToolsPreset struct {
 	Preset string `json:"preset"` // e.g., "claude_code"
 }
 
+// SystemPromptPreset represents a preset system prompt configuration.
+// This allows using predefined system prompts like "claude_code" with optional appended text.
+type SystemPromptPreset struct {
+	Type   string `json:"type"`             // Always "preset"
+	Preset string `json:"preset"`           // e.g., "claude_code"
+	Append string `json:"append,omitempty"` // Optional text to append to preset
+}
+
 // SettingSource represents a settings source location.
 type SettingSource string
 
@@ -158,7 +166,8 @@ type Options struct {
 	Betas []SdkBeta `json:"betas,omitempty"`
 
 	// System Prompts & Model
-	SystemPrompt       *string `json:"system_prompt,omitempty"`
+	// SystemPrompt can be a string or SystemPromptPreset.
+	SystemPrompt       any     `json:"system_prompt,omitempty"`
 	AppendSystemPrompt *string `json:"append_system_prompt,omitempty"`
 	Model              *string `json:"model,omitempty"`
 	FallbackModel      *string `json:"fallback_model,omitempty"`

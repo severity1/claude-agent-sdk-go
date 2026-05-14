@@ -1395,6 +1395,79 @@ func validateNoJSONSchemaFlag(t *testing.T, cmd []string) {
 
 const agentsFlag = "--agents"
 
+const (
+	systemPromptFlag       = "--system-prompt"
+	appendSystemPromptFlag = "--append-system-prompt"
+)
+
+// TestSystemPromptPresetSupport tests system prompt CLI flag generation
+func TestSystemPromptPresetSupport(t *testing.T) {
+	tests := []struct {
+		name     string
+		options  *shared.Options
+		validate func(*testing.T, []string)
+	}{
+		{
+			name: "string_system_prompt",
+			options: &shared.Options{
+				SystemPrompt: "You are a helpful assistant",
+			},
+			validate: func(t *testing.T, cmd []string) {
+				t.Helper()
+				assertContainsArgs(t, cmd, systemPromptFlag, "You are a helpful assistant")
+			},
+		},
+		{
+			name: "preset_without_append",
+			options: &shared.Options{
+				SystemPrompt: shared.SystemPromptPreset{
+					Type:   "preset",
+					Preset: "claude_code",
+				},
+			},
+			validate: func(t *testing.T, cmd []string) {
+				t.Helper()
+				// Preset without append should not add any flags
+				assertNotContainsArg(t, cmd, systemPromptFlag)
+				assertNotContainsArg(t, cmd, appendSystemPromptFlag)
+			},
+		},
+		{
+			name: "preset_with_append",
+			options: &shared.Options{
+				SystemPrompt: shared.SystemPromptPreset{
+					Type:   "preset",
+					Preset: "claude_code",
+					Append: "Also follow these rules...",
+				},
+			},
+			validate: func(t *testing.T, cmd []string) {
+				t.Helper()
+				// Preset with append should only add --append-system-prompt
+				assertNotContainsArg(t, cmd, systemPromptFlag)
+				assertContainsArgs(t, cmd, appendSystemPromptFlag, "Also follow these rules...")
+			},
+		},
+		{
+			name: "nil_system_prompt",
+			options: &shared.Options{
+				SystemPrompt: nil,
+			},
+			validate: func(t *testing.T, cmd []string) {
+				t.Helper()
+				assertNotContainsArg(t, cmd, systemPromptFlag)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := BuildCommand("/usr/local/bin/claude", test.options, true)
+			test.validate(t, cmd)
+		})
+	}
+}
+
 // TestAgentsFlagSupport tests --agents CLI flag generation
 func TestAgentsFlagSupport(t *testing.T) {
 	tests := []struct {

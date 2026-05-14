@@ -213,7 +213,7 @@ func TestFunctionalOptionsPattern(t *testing.T) {
 	)
 
 	// Verify all options are correctly applied
-	if options.SystemPrompt == nil || *options.SystemPrompt != "You are a helpful assistant" {
+	if sp, ok := options.SystemPrompt.(string); !ok || sp != "You are a helpful assistant" {
 		t.Errorf("Expected SystemPrompt = %q, got %v", "You are a helpful assistant", options.SystemPrompt)
 	}
 
@@ -679,7 +679,11 @@ func assertOptionsSystemPrompt(t *testing.T, options *Options, expected string) 
 		t.Error("Expected SystemPrompt to be set, got nil")
 		return
 	}
-	actual := *options.SystemPrompt
+	actual, ok := options.SystemPrompt.(string)
+	if !ok {
+		t.Errorf("Expected SystemPrompt to be string, got %T", options.SystemPrompt)
+		return
+	}
 	if actual != expected {
 		t.Errorf("Expected SystemPrompt = %q, got %q", expected, actual)
 	}
@@ -689,7 +693,7 @@ func assertOptionsSystemPrompt(t *testing.T, options *Options, expected string) 
 func assertOptionsSystemPromptNil(t *testing.T, options *Options) {
 	t.Helper()
 	if options.SystemPrompt != nil {
-		t.Errorf("Expected SystemPrompt = nil, got %v", *options.SystemPrompt)
+		t.Errorf("Expected SystemPrompt = nil, got %v", options.SystemPrompt)
 	}
 }
 
