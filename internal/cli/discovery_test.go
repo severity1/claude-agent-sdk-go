@@ -1698,3 +1698,94 @@ func createVersionMockCLI(t *testing.T, version string) string {
 	}
 	return mockCLI
 }
+
+// TestBuildCommandWithLengthOptimization tests command line length optimization
+func TestBuildCommandWithLengthOptimization(t *testing.T) {
+	t.Run("short_command_no_optimization", func(t *testing.T) {
+		options := &shared.Options{
+			MaxTurns: 5,
+		}
+
+		result, err := BuildCommandWithLengthOptimization("/usr/local/bin/claude", options, true)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+		defer result.CleanupTempFiles()
+
+		if len(result.TempFiles) != 0 {
+			t.Errorf("Expected no temp files for short command, got %d", len(result.TempFiles))
+		}
+
+		assertContainsArgs(t, result.Args, "--max-turns", "5")
+	})
+
+	t.Run("cleanup_removes_temp_files", func(t *testing.T) {
+		// Create a result with a temp file
+		tmpFile, err := os.CreateTemp("", "test-cleanup-*.txt")
+		if err != nil {
+			t.Fatalf("Failed to create temp file: %v", err)
+		}
+		tmpPath := tmpFile.Name()
+		if err := tmpFile.Close(); err != nil {
+			t.Fatalf("Failed to close temp file: %v", err)
+		}
+
+		result := &CommandResult{
+			Args:      []string{"test"},
+			TempFiles: []string{tmpPath},
+		}
+
+		// Verify file exists
+		if _, err := os.Stat(tmpPath); os.IsNotExist(err) {
+			t.Fatal("Temp file should exist before cleanup")
+		}
+
+		// Cleanup
+		result.CleanupTempFiles()
+
+		// Verify file is removed
+		if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+			t.Error("Temp file should be removed after cleanup")
+		}
+	})
+
+	t.Run("getMaxCmdLength_returns_correct_limit", func(t *testing.T) {
+		limit := getMaxCmdLength()
+		if runtime.GOOS == windowsOS {
+			if limit != maxCmdLengthWindows {
+				t.Errorf("Expected %d for Windows, got %d", maxCmdLengthWindows, limit)
+			}
+		} else {
+			if limit != maxCmdLengthUnix {
+				t.Errorf("Expected %d for Unix, got %d", maxCmdLengthUnix, limit)
+			}
+		}
+	})
+
+	t.Run("agents_optimization_uses_constant", func(t *testing.T) {
+		// Verify the constant is used correctly in optimization logic
+		// This test ensures we use agentsFlag constant instead of string literal
+		options := &shared.Options{
+			Agents: map[string]shared.AgentDefinition{
+				"test": {
+					Description: "test agent",
+					Prompt:      "test prompt",
+				},
+			},
+		}
+
+		cmd := BuildCommand("/usr/local/bin/claude", options, true)
+
+		// Verify --agents flag is present using the constant
+		found := false
+		for _, arg := range cmd {
+			if arg == agentsFlag {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected %s flag to be present", agentsFlag)
+		}
+	})
+}

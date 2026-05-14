@@ -19,6 +19,13 @@ import (
 
 const windowsOS = "windows"
 
+// Command line length limits for different operating systems.
+// Windows has a much smaller limit than Unix-like systems.
+const (
+	maxCmdLengthWindows = 8000
+	maxCmdLengthUnix    = 100000
+)
+
 // MinimumCLIVersion is the minimum supported Claude Code CLI version.
 // Features may not work correctly with older versions.
 const MinimumCLIVersion = "2.0.76"
@@ -29,6 +36,29 @@ var versionRegex = regexp.MustCompile(`([0-9]+\.[0-9]+\.[0-9]+)`)
 // DiscoveryPaths defines the standard search paths for Claude CLI.
 var DiscoveryPaths = []string{
 	// Will be populated with dynamic paths in FindCLI()
+}
+
+// CommandResult holds the command arguments and any temporary files created
+// for command line length optimization.
+type CommandResult struct {
+	Args      []string
+	TempFiles []string
+}
+
+// CleanupTempFiles removes any temporary files created during command building.
+// This should be called after the command has finished executing.
+func (r *CommandResult) CleanupTempFiles() {
+	for _, f := range r.TempFiles {
+		_ = os.Remove(f)
+	}
+}
+
+// getMaxCmdLength returns the maximum command line length for the current OS.
+func getMaxCmdLength() int {
+	if runtime.GOOS == windowsOS {
+		return maxCmdLengthWindows
+	}
+	return maxCmdLengthUnix
 }
 
 // FindCLI searches for the Claude CLI binary in standard locations.
@@ -144,6 +174,87 @@ func BuildCommandWithPrompt(cliPath string, options *shared.Options, prompt stri
 	cmd = append(cmd, "--print", prompt)
 
 	return cmd
+}
+
+// BuildCommandWithLengthOptimization builds a command with automatic handling
+// of command line length limits. If the command line would exceed OS limits,
+// large arguments (like --agents JSON) are written to temporary files.
+// The caller MUST call CommandResult.CleanupTempFiles() after command execution.
+func BuildCommandWithLengthOptimization(cliPath string, options *shared.Options, closeStdin bool) (*CommandResult, error) {
+	// Build command normally first
+	cmd := BuildCommand(cliPath, options, closeStdin)
+
+	// Calculate total command line length
+	totalLen := 0
+	for _, arg := range cmd {
+		totalLen += len(arg) + 1 // +1 for space/separator
+	}
+
+	maxLen := getMaxCmdLength()
+	if totalLen <= maxLen {
+		return &CommandResult{Args: cmd, TempFiles: nil}, nil
+	}
+
+	// Command is too long - optimize by writing large args to temp files
+	return optimizeCommandLength(cmd, options)
+}
+
+// optimizeCommandLength writes large arguments to temp files and returns optimized command.
+// The options parameter is kept for future extensibility but currently unused.
+func optimizeCommandLength(cmd []string, _ *shared.Options) (*CommandResult, error) {
+	var tempFiles []string
+	optimizedCmd := make([]string, 0, len(cmd))
+
+	// Find and replace --agents argument with file reference
+	for i := 0; i < len(cmd); i++ {
+		if cmd[i] == "--agents" && i+1 < len(cmd) {
+			// Write agents JSON to temp file
+			agentsJSON := cmd[i+1]
+			tmpFile, err := os.CreateTemp("", "claude-agents-*.json")
+			if err != nil {
+				// Cleanup any files created so far
+				for _, f := range tempFiles {
+					_ = os.Remove(f)
+				}
+				return nil, fmt.Errorf("failed to create temp file for agents: %w", err)
+			}
+
+			if _, err := tmpFile.WriteString(agentsJSON); err != nil {
+				_ = tmpFile.Close()
+				_ = os.Remove(tmpFile.Name())
+				for _, f := range tempFiles {
+					_ = os.Remove(f)
+				}
+				return nil, fmt.Errorf("failed to write agents to temp file: %w", err)
+			}
+
+			// Sync to ensure data is written before command reads it
+			if err := tmpFile.Sync(); err != nil {
+				_ = tmpFile.Close()
+				_ = os.Remove(tmpFile.Name())
+				for _, f := range tempFiles {
+					_ = os.Remove(f)
+				}
+				return nil, fmt.Errorf("failed to sync agents temp file: %w", err)
+			}
+
+			if err := tmpFile.Close(); err != nil {
+				_ = os.Remove(tmpFile.Name())
+				for _, f := range tempFiles {
+					_ = os.Remove(f)
+				}
+				return nil, fmt.Errorf("failed to close agents temp file: %w", err)
+			}
+
+			tempFiles = append(tempFiles, tmpFile.Name())
+			optimizedCmd = append(optimizedCmd, "--agents-file", tmpFile.Name())
+			i++ // Skip the next argument (the JSON value)
+		} else {
+			optimizedCmd = append(optimizedCmd, cmd[i])
+		}
+	}
+
+	return &CommandResult{Args: optimizedCmd, TempFiles: tempFiles}, nil
 }
 
 // addOptionsToCommand adds all Options fields as CLI flags
