@@ -320,6 +320,31 @@ func WithExtraArgs(args map[string]*string) Option {
 	}
 }
 
+// WithExtraFlag adds a boolean flag to ExtraArgs.
+// This is a convenience helper for adding flags without values (nil value).
+// Example: WithExtraFlag("fork-session") instead of manually creating map[string]*string{"fork-session": nil}
+func WithExtraFlag(name string) Option {
+	return func(o *Options) {
+		if o.ExtraArgs == nil {
+			o.ExtraArgs = make(map[string]*string)
+		}
+		o.ExtraArgs[name] = nil
+	}
+}
+
+// WithExtraArg adds a flag with a value to ExtraArgs.
+// This is a convenience helper for adding flags with values.
+// Example: WithExtraArg("setting", "value") instead of manually creating map[string]*string with pointer.
+func WithExtraArg(name, value string) Option {
+	return func(o *Options) {
+		if o.ExtraArgs == nil {
+			o.ExtraArgs = make(map[string]*string)
+		}
+		valueCopy := value
+		o.ExtraArgs[name] = &valueCopy
+	}
+}
+
 // WithCLIPath sets a custom CLI path.
 func WithCLIPath(path string) Option {
 	return func(o *Options) {

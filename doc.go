@@ -7,7 +7,7 @@
 // The SDK follows Go-native patterns with goroutines and channels instead of
 // async/await, providing context-first design for cancellation and timeouts.
 //
-// Example usage:
+// # Basic Usage
 //
 //	import "github.com/severity1/claude-agent-sdk-go"
 //
@@ -22,6 +22,31 @@
 //		claudecode.WithSystemPrompt("You are a helpful assistant"),
 //	)
 //	defer client.Close()
+//
+// # ExtraArgs Helpers
+//
+// The SDK provides convenient helpers for adding arbitrary CLI flags via ExtraArgs:
+//
+//	// Boolean flags (no value)
+//	opts := claudecode.NewOptions(
+//		claudecode.WithExtraFlag("fork-session"),
+//		claudecode.WithExtraFlag("verbose"),
+//	)
+//
+//	// Flags with values
+//	opts := claudecode.NewOptions(
+//		claudecode.WithExtraArg("output-format", "json"),
+//		claudecode.WithExtraArg("log-level", "debug"),
+//	)
+//
+//	// Mixing both types
+//	opts := claudecode.NewOptions(
+//		claudecode.WithExtraFlag("verbose"),
+//		claudecode.WithExtraArg("format", "xml"),
+//	)
+//
+// These helpers replace manual map[string]*string creation, making the code cleaner
+// and easier to use.
 //
 // The SDK provides 100% feature parity with the Python SDK while embracing
 // Go idioms and patterns.
