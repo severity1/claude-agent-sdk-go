@@ -264,7 +264,14 @@ func TestMcpToolsListResponseAnnotationsAllFields(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	tools := result["result"].(map[string]any)["tools"].([]map[string]any)
+	resultData, ok := result["result"].(map[string]any)
+	if !ok {
+		t.Fatal("Expected result to be a map")
+	}
+	tools, ok := resultData["tools"].([]map[string]any)
+	if !ok {
+		t.Fatal("Expected tools to be a slice of maps")
+	}
 	ann, ok := tools[0]["annotations"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected annotations map, got %T (%v)", tools[0]["annotations"], tools[0]["annotations"])

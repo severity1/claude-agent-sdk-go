@@ -9,6 +9,8 @@
 //
 // Key components:
 // - NewTool: Creates tool definitions (Go alternative to Python's @tool decorator)
+// - WithToolAnnotations: Attaches MCP-spec behavioral hints to a tool
+//   (title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint)
 // - CreateSDKMcpServer: Creates an MCP server instance with tools
 // - WithSdkMcpServer: Adds the server to the client configuration
 // - Tool naming: mcp__<server_name>__<tool_name> format for AllowedTools
@@ -44,9 +46,22 @@ func main() {
 	fmt.Println()
 	runTextProcessorExample()
 
+	// Example 3: Tool with MCP-spec annotations (read-only, idempotent, closed-world)
+	fmt.Println()
+	fmt.Println("--- Example 3: Annotated Tool ---")
+	fmt.Println("Tools: circle_area (read-only, idempotent, closed-world hints)")
+	fmt.Println()
+	runAnnotatedToolExample()
+
 	fmt.Println()
 	fmt.Println("SDK MCP Server examples completed!")
 }
+
+// ptrTo returns a pointer to v. Used to populate the pointer fields on
+// ToolAnnotations (Title *string, ReadOnlyHint *bool, etc.). A nil pointer
+// means "field not set" and is omitted from the wire format; *false vs nil
+// is a meaningful distinction for the CLI.
+func ptrTo[T any](v T) *T { return &v }
 
 // runCalculatorExample demonstrates a calculator with math tools
 func runCalculatorExample() {
@@ -254,6 +269,85 @@ func runTextProcessorExample() {
 	},
 		claudecode.WithSdkMcpServer("text", textProcessor),
 		claudecode.WithAllowedTools("mcp__text__uppercase", "mcp__text__reverse", "mcp__text__word_count"),
+		claudecode.WithMaxTurns(5),
+	)
+
+	if err != nil {
+		if cliErr := claudecode.AsCLINotFoundError(err); cliErr != nil {
+			fmt.Printf("Claude CLI not found: %v\n", cliErr)
+			fmt.Println("Install with: npm install -g @anthropic-ai/claude-code")
+			return
+		}
+		if connErr := claudecode.AsConnectionError(err); connErr != nil {
+			fmt.Printf("Connection failed: %v\n", connErr)
+			return
+		}
+		fmt.Printf("Error: %v\n", err)
+	}
+}
+
+// runAnnotatedToolExample demonstrates attaching MCP-spec ToolAnnotations to
+// a tool. The annotations are advisory hints sent to the CLI in the JSONRPC
+// tools/list response under the "annotations" key. The key is omitted entirely
+// when a tool has no annotations (matching Python's exclude_none semantics).
+func runAnnotatedToolExample() {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// circle_area: a pure computation. It reads no state, performs no side
+	// effects, and reaching the same result for the same input - that maps
+	// to readOnly + idempotent + closed-world (not openWorld).
+	circleAreaTool := claudecode.NewTool(
+		"circle_area",
+		"Compute the area of a circle given its radius",
+		map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"radius": map[string]any{
+					"type":        "number",
+					"description": "Radius of the circle (non-negative)",
+				},
+			},
+			"required": []string{"radius"},
+		},
+		func(_ context.Context, args map[string]any) (*claudecode.McpToolResult, error) {
+			radius, _ := args["radius"].(float64)
+			if radius < 0 {
+				return &claudecode.McpToolResult{
+					Content: []claudecode.McpContent{
+						{Type: "text", Text: "Error: radius must be non-negative"},
+					},
+					IsError: true,
+				}, nil
+			}
+			area := math.Pi * radius * radius
+			fmt.Printf("  [TOOL] circle_area(%v) = %.4f\n", radius, area)
+			return &claudecode.McpToolResult{
+				Content: []claudecode.McpContent{
+					{Type: "text", Text: fmt.Sprintf("Area of circle with radius %.2f = %.4f", radius, area)},
+				},
+			}, nil
+		},
+		claudecode.WithToolAnnotations(&claudecode.ToolAnnotations{
+			Title:          ptrTo("Circle Area Calculator"),
+			ReadOnlyHint:   ptrTo(true),
+			IdempotentHint: ptrTo(true),
+			OpenWorldHint:  ptrTo(false),
+		}),
+	)
+
+	geometry := claudecode.CreateSDKMcpServer("geometry", "1.0.0", circleAreaTool)
+
+	fmt.Println("Asking Claude to compute a circle area...")
+
+	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
+		if err := client.Query(ctx, "Use the circle_area tool to compute the area of a circle with radius 7."); err != nil {
+			return err
+		}
+		return streamResponse(ctx, client)
+	},
+		claudecode.WithSdkMcpServer("geo", geometry),
+		claudecode.WithAllowedTools("mcp__geo__circle_area"),
 		claudecode.WithMaxTurns(5),
 	)
 

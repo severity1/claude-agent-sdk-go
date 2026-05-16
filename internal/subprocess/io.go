@@ -153,7 +153,6 @@ func formatInitError(msg *shared.ResultMessage) string {
 
 // setupStderr configures stderr handling based on options.
 // Precedence: StderrCallback > DebugWriter > temp file (default).
-// This extracts stderr setup logic from Connect to reduce cyclomatic complexity.
 func (t *Transport) setupStderr() error {
 	switch {
 	case t.options != nil && t.options.StderrCallback != nil:

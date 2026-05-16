@@ -51,6 +51,8 @@ func (p *Protocol) handleMcpMessageRequest(ctx context.Context, requestID string
 }
 
 // routeMcpMethod dispatches JSONRPC methods to server handlers.
+//
+//nolint:gocyclo
 func (p *Protocol) routeMcpMethod(ctx context.Context, server McpServer, msg map[string]any) (map[string]any, error) {
 	method := getString(msg, "method")
 	params, _ := msg["params"].(map[string]any)
