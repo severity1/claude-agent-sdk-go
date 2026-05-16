@@ -369,8 +369,8 @@ func (c *McpSdkServerConfig) GetType() McpServerType {
 // a tool author when defining an SDK MCP tool. Sent to the CLI as part of
 // the JSONRPC tools/list response under the "annotations" key.
 //
-// All fields are pointers so unset fields are omitted from the wire format
-// (matches Python's pydantic exclude_none=True semantics). See MCP spec:
+// All fields are pointers so unset fields are omitted from the wire format.
+// See MCP spec:
 // https://modelcontextprotocol.io/specification/2025-03-26/server/tools#tool
 //
 // This is the authoring counterpart to McpToolAnnotations in the control

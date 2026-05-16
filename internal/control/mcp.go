@@ -51,8 +51,6 @@ func (p *Protocol) handleMcpMessageRequest(ctx context.Context, requestID string
 }
 
 // routeMcpMethod dispatches JSONRPC methods to server handlers.
-//
-//nolint:gocyclo
 func (p *Protocol) routeMcpMethod(ctx context.Context, server McpServer, msg map[string]any) (map[string]any, error) {
 	method := getString(msg, "method")
 	params, _ := msg["params"].(map[string]any)
@@ -78,27 +76,7 @@ func (p *Protocol) routeMcpMethod(ctx context.Context, server McpServer, msg map
 		if err != nil {
 			return nil, err
 		}
-		toolsData := make([]map[string]any, len(tools))
-		for i, t := range tools {
-			entry := map[string]any{
-				"name":        t.Name,
-				"description": t.Description,
-				"inputSchema": t.InputSchema,
-			}
-			if t.Annotations != nil {
-				annMap, err := annotationsToMap(t.Annotations)
-				if err != nil {
-					return nil, err
-				}
-				entry["annotations"] = annMap
-			}
-			toolsData[i] = entry
-		}
-		return map[string]any{
-			"jsonrpc": "2.0",
-			"id":      msgID,
-			"result":  map[string]any{"tools": toolsData},
-		}, nil
+		return buildToolsListResult(tools, msgID)
 
 	case "tools/call":
 		if params == nil {
@@ -164,9 +142,36 @@ func (p *Protocol) sendMcpResponse(ctx context.Context, requestID string, mcpRes
 	return p.transport.Write(ctx, append(data, '\n'))
 }
 
+// buildToolsListResult builds the JSONRPC tools/list response payload from a
+// slice of tool definitions. Pulled out of routeMcpMethod to keep the dispatch
+// switch under the gocyclo budget and to isolate wire-format shaping.
+func buildToolsListResult(tools []McpToolDefinition, msgID any) (map[string]any, error) {
+	toolsData := make([]map[string]any, len(tools))
+	for i, t := range tools {
+		entry := map[string]any{
+			"name":        t.Name,
+			"description": t.Description,
+			"inputSchema": t.InputSchema,
+		}
+		if t.Annotations != nil {
+			annMap, err := annotationsToMap(t.Annotations)
+			if err != nil {
+				return nil, err
+			}
+			entry["annotations"] = annMap
+		}
+		toolsData[i] = entry
+	}
+	return map[string]any{
+		"jsonrpc": "2.0",
+		"id":      msgID,
+		"result":  map[string]any{"tools": toolsData},
+	}, nil
+}
+
 // annotationsToMap converts a ToolAnnotations value to a map[string]any with
 // json `omitempty` honored, so only the fields the caller set appear on the
-// wire. Mirrors Python's `tool.annotations.model_dump(exclude_none=True)`.
+// wire. Empty fields are omitted from the resulting map.
 func annotationsToMap(ann *ToolAnnotations) (map[string]any, error) {
 	raw, err := json.Marshal(ann)
 	if err != nil {

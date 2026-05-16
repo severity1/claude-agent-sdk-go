@@ -149,7 +149,9 @@ func TestMcpToolsListResponse(t *testing.T) {
 
 // TestMcpToolsListResponseWithAnnotations verifies that tools/list response
 // includes the "annotations" key only for tools whose Annotations field is
-// set, and that nil annotations omit the key entirely.
+// non-nil. A nil pointer omits the key; a non-nil but empty value still
+// emits the key with an empty map (all fields are pointers with omitempty,
+// so an empty struct produces no map entries but the key itself is present).
 func TestMcpToolsListResponseWithAnnotations(t *testing.T) {
 	ctx, cancel := setupMcpTestContext(t, 5*time.Second)
 	defer cancel()
@@ -171,6 +173,12 @@ func TestMcpToolsListResponseWithAnnotations(t *testing.T) {
 			Name:        "no_ann",
 			Description: "No annotations",
 			InputSchema: map[string]any{"type": "object"},
+		},
+		{
+			Name:        "empty_ann",
+			Description: "Non-nil but all-fields-unset annotations",
+			InputSchema: map[string]any{"type": "object"},
+			Annotations: &ToolAnnotations{},
 		},
 	}
 
@@ -195,8 +203,8 @@ func TestMcpToolsListResponseWithAnnotations(t *testing.T) {
 	if !ok {
 		t.Fatal("Expected tools to be a slice of maps")
 	}
-	if len(tools) != 2 {
-		t.Fatalf("Expected 2 tools, got %d", len(tools))
+	if len(tools) != 3 {
+		t.Fatalf("Expected 3 tools, got %d", len(tools))
 	}
 
 	for _, td := range tools {
@@ -222,6 +230,15 @@ func TestMcpToolsListResponseWithAnnotations(t *testing.T) {
 		case "no_ann":
 			if _, present := td["annotations"]; present {
 				t.Errorf("no_ann should omit annotations key, got %v", td["annotations"])
+			}
+		case "empty_ann":
+			ann, ok := td["annotations"].(map[string]any)
+			if !ok {
+				t.Errorf("empty_ann.annotations missing or wrong type: %T (%v)", td["annotations"], td["annotations"])
+				continue
+			}
+			if len(ann) != 0 {
+				t.Errorf("empty_ann.annotations should be empty map, got %d keys: %v", len(ann), ann)
 			}
 		}
 	}
