@@ -78,11 +78,19 @@ func (p *Protocol) routeMcpMethod(ctx context.Context, server McpServer, msg map
 		}
 		toolsData := make([]map[string]any, len(tools))
 		for i, t := range tools {
-			toolsData[i] = map[string]any{
+			entry := map[string]any{
 				"name":        t.Name,
 				"description": t.Description,
 				"inputSchema": t.InputSchema,
 			}
+			if t.Annotations != nil {
+				annMap, err := annotationsToMap(t.Annotations)
+				if err != nil {
+					return nil, err
+				}
+				entry["annotations"] = annMap
+			}
+			toolsData[i] = entry
 		}
 		return map[string]any{
 			"jsonrpc": "2.0",
@@ -152,6 +160,21 @@ func (p *Protocol) sendMcpResponse(ctx context.Context, requestID string, mcpRes
 		return fmt.Errorf("failed to marshal MCP response: %w", err)
 	}
 	return p.transport.Write(ctx, append(data, '\n'))
+}
+
+// annotationsToMap converts a ToolAnnotations value to a map[string]any with
+// json `omitempty` honored, so only the fields the caller set appear on the
+// wire. Mirrors Python's `tool.annotations.model_dump(exclude_none=True)`.
+func annotationsToMap(ann *ToolAnnotations) (map[string]any, error) {
+	raw, err := json.Marshal(ann)
+	if err != nil {
+		return nil, fmt.Errorf("marshal annotations: %w", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("unmarshal annotations: %w", err)
+	}
+	return out, nil
 }
 
 // sendMcpErrorResponse sends an MCP JSONRPC error response.

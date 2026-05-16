@@ -68,6 +68,117 @@ func TestNewToolCreation(t *testing.T) {
 	}
 }
 
+// TestNewToolWithoutAnnotations verifies the bare NewTool call still works
+// and reports nil annotations.
+func TestNewToolWithoutAnnotations(t *testing.T) {
+	tool := NewTool("simple", "Simple tool", nil, dummyHandler)
+	if tool.Annotations() != nil {
+		t.Errorf("Annotations() = %+v, want nil", tool.Annotations())
+	}
+}
+
+// TestNewToolWithAnnotations verifies WithToolAnnotations attaches an
+// annotations value reachable via Annotations().
+func TestNewToolWithAnnotations(t *testing.T) {
+	tests := []struct {
+		name string
+		ann  *ToolAnnotations
+	}{
+		{
+			name: "title_only",
+			ann:  &ToolAnnotations{Title: ptrTo("Calculator")},
+		},
+		{
+			name: "read_only_hint_true",
+			ann:  &ToolAnnotations{ReadOnlyHint: ptrTo(true)},
+		},
+		{
+			name: "destructive_hint_false",
+			ann:  &ToolAnnotations{DestructiveHint: ptrTo(false)},
+		},
+		{
+			name: "idempotent_hint_true",
+			ann:  &ToolAnnotations{IdempotentHint: ptrTo(true)},
+		},
+		{
+			name: "open_world_hint_false",
+			ann:  &ToolAnnotations{OpenWorldHint: ptrTo(false)},
+		},
+		{
+			name: "all_fields_set",
+			ann: &ToolAnnotations{
+				Title:           ptrTo("Full"),
+				ReadOnlyHint:    ptrTo(true),
+				DestructiveHint: ptrTo(false),
+				IdempotentHint:  ptrTo(true),
+				OpenWorldHint:   ptrTo(false),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tool := NewTool("t", "desc", nil, dummyHandler, WithToolAnnotations(tt.ann))
+			got := tool.Annotations()
+			if got == nil {
+				t.Fatal("Annotations() = nil, want non-nil")
+			}
+			if got != tt.ann {
+				t.Errorf("Annotations() = %+v, want %+v (same pointer)", got, tt.ann)
+			}
+		})
+	}
+}
+
+// TestSdkMcpServerListToolsAnnotations verifies the annotations attached to
+// a tool flow through SdkMcpServer.ListTools() into McpToolDefinition, and
+// that tools without annotations report nil (not an empty struct).
+func TestSdkMcpServerListToolsAnnotations(t *testing.T) {
+	ctx, cancel := setupMcpTestContext(t, 5*time.Second)
+	defer cancel()
+
+	annotated := NewTool("annotated", "Has annotations", nil, dummyHandler,
+		WithToolAnnotations(&ToolAnnotations{
+			Title:        ptrTo("Annotated Tool"),
+			ReadOnlyHint: ptrTo(true),
+		}),
+	)
+	plain := NewTool("plain", "No annotations", nil, dummyHandler)
+
+	server := CreateSDKMcpServer("test", "1.0.0", annotated, plain)
+	tools, err := server.Instance.ListTools(ctx)
+	if err != nil {
+		t.Fatalf("ListTools error: %v", err)
+	}
+	if len(tools) != 2 {
+		t.Fatalf("Expected 2 tools, got %d", len(tools))
+	}
+
+	for _, td := range tools {
+		switch td.Name {
+		case "annotated":
+			if td.Annotations == nil {
+				t.Error("annotated.Annotations = nil, want non-nil")
+				continue
+			}
+			if td.Annotations.Title == nil || *td.Annotations.Title != "Annotated Tool" {
+				t.Errorf("annotated.Annotations.Title = %v, want %q", td.Annotations.Title, "Annotated Tool")
+			}
+			if td.Annotations.ReadOnlyHint == nil || !*td.Annotations.ReadOnlyHint {
+				t.Errorf("annotated.Annotations.ReadOnlyHint = %v, want *true", td.Annotations.ReadOnlyHint)
+			}
+		case "plain":
+			if td.Annotations != nil {
+				t.Errorf("plain.Annotations = %+v, want nil", td.Annotations)
+			}
+		}
+	}
+}
+
+// ptrTo returns a pointer to the given value. Used to construct
+// pointer fields on test fixtures.
+func ptrTo[T any](v T) *T { return &v }
+
 // TestToolHandlerExecution tests that tool handlers are called correctly.
 func TestToolHandlerExecution(t *testing.T) {
 	ctx, cancel := setupMcpTestContext(t, 5*time.Second)

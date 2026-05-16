@@ -365,11 +365,32 @@ func (c *McpSdkServerConfig) GetType() McpServerType {
 	return McpServerTypeSdk
 }
 
+// ToolAnnotations carries optional MCP-spec behavioral hints attached by
+// a tool author when defining an SDK MCP tool. Sent to the CLI as part of
+// the JSONRPC tools/list response under the "annotations" key.
+//
+// All fields are pointers so unset fields are omitted from the wire format
+// (matches Python's pydantic exclude_none=True semantics). See MCP spec:
+// https://modelcontextprotocol.io/specification/2025-03-26/server/tools#tool
+//
+// This is the authoring counterpart to McpToolAnnotations in the control
+// package, which describes annotations as reported back by the CLI in
+// GetMcpStatus responses. The two are kept separate because the CLI strips
+// the "Hint" suffix on status responses, so the wire field sets differ.
+type ToolAnnotations struct {
+	Title           *string `json:"title,omitempty"`
+	ReadOnlyHint    *bool   `json:"readOnlyHint,omitempty"`
+	DestructiveHint *bool   `json:"destructiveHint,omitempty"`
+	IdempotentHint  *bool   `json:"idempotentHint,omitempty"`
+	OpenWorldHint   *bool   `json:"openWorldHint,omitempty"`
+}
+
 // McpToolDefinition describes a tool exposed by an MCP server.
 type McpToolDefinition struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	InputSchema map[string]any   `json:"inputSchema"`
+	Annotations *ToolAnnotations `json:"annotations,omitempty"`
 }
 
 // McpToolResult represents the result of a tool call.

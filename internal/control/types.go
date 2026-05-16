@@ -346,4 +346,8 @@ type (
 	McpToolResult = shared.McpToolResult
 	// McpContent represents content returned by a tool.
 	McpContent = shared.McpContent
+	// ToolAnnotations carries MCP-spec behavioral hints attached to an SDK MCP tool.
+	// Distinct from McpToolAnnotations above, which is the CLI-stripped response
+	// shape returned by GetMcpStatus.
+	ToolAnnotations = shared.ToolAnnotations
 )

@@ -19,6 +19,9 @@ type (
 	McpToolDefinition = shared.McpToolDefinition
 	// McpSdkServerConfig configures an in-process SDK MCP server.
 	McpSdkServerConfig = shared.McpSdkServerConfig
+	// ToolAnnotations carries MCP-spec behavioral hints (title, readOnlyHint,
+	// destructiveHint, idempotentHint, openWorldHint) attached to an SDK MCP tool.
+	ToolAnnotations = shared.ToolAnnotations
 )
 
 // McpServerTypeSdk represents an in-process SDK MCP server.
@@ -47,6 +50,29 @@ type McpTool struct {
 	description string
 	inputSchema map[string]any
 	handler     McpToolHandler
+	annotations *ToolAnnotations
+}
+
+// ToolOption configures optional fields on an McpTool at construction time.
+// Used as variadic args to NewTool to extend the tool without breaking the
+// positional signature. See WithToolAnnotations for the canonical example.
+type ToolOption func(*McpTool)
+
+// WithToolAnnotations attaches MCP-spec behavioral hints to a tool.
+// The provided pointer is stored as-is and surfaced unchanged via
+// McpTool.Annotations() and McpToolDefinition.Annotations.
+//
+// Example:
+//
+//	tool := claudecode.NewTool(
+//	    "read_file", "Read a file from disk", schema, handler,
+//	    claudecode.WithToolAnnotations(&claudecode.ToolAnnotations{
+//	        ReadOnlyHint: ptrTo(true),
+//	        OpenWorldHint: ptrTo(false),
+//	    }),
+//	)
+func WithToolAnnotations(ann *ToolAnnotations) ToolOption {
+	return func(t *McpTool) { t.annotations = ann }
 }
 
 // NewTool creates a new MCP tool definition.
@@ -75,13 +101,17 @@ type McpTool struct {
 //	        }, nil
 //	    },
 //	)
-func NewTool(name, description string, inputSchema map[string]any, handler McpToolHandler) *McpTool {
-	return &McpTool{
+func NewTool(name, description string, inputSchema map[string]any, handler McpToolHandler, opts ...ToolOption) *McpTool {
+	t := &McpTool{
 		name:        name,
 		description: description,
 		inputSchema: inputSchema,
 		handler:     handler,
 	}
+	for _, opt := range opts {
+		opt(t)
+	}
+	return t
 }
 
 // Name returns the tool's name.
@@ -97,6 +127,12 @@ func (t *McpTool) Description() string {
 // InputSchema returns the tool's input JSON schema.
 func (t *McpTool) InputSchema() map[string]any {
 	return t.inputSchema
+}
+
+// Annotations returns the tool's MCP-spec annotations, or nil if none
+// were attached via WithToolAnnotations.
+func (t *McpTool) Annotations() *ToolAnnotations {
+	return t.annotations
 }
 
 // Call executes the tool handler with the given context and arguments.
@@ -168,6 +204,7 @@ func (s *SdkMcpServer) ListTools(_ context.Context) ([]McpToolDefinition, error)
 			Name:        tool.Name(),
 			Description: tool.Description(),
 			InputSchema: tool.InputSchema(),
+			Annotations: tool.Annotations(),
 		})
 	}
 	return defs, nil
