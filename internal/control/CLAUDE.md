@@ -52,6 +52,7 @@ control/
 - Missing fields added (PR #545): `ToolUseID string` on PreToolUseHookInput and PostToolUseHookInput; `AgentID`, `AgentTranscriptPath`, `AgentType` as flat required string fields on SubagentStopHookInput (NOT via mixin - mixin is a separate construct landing in PR #628); `AdditionalContext *string` on PreToolUseHookSpecificOutput; `UpdatedMCPToolOutput any` (Go acronym casing, wire tag `updatedMCPToolOutput`) on PostToolUseHookSpecificOutput
 - getAnySlice helper in hooks.go: mirrors getMap; returns nil when key absent (Python NotRequired semantics); use for []any typed fields
 - PostToolUseFailureHookInput fields: `ToolUseID string`, `Error string`, `IsInterrupt *bool json:"is_interrupt,omitempty"`; nil `IsInterrupt` maps to key absent in JSON (Python `NotRequired[bool]`); `PostToolUseFailureHookSpecificOutput` is structurally identical to `PostToolUseHookSpecificOutput` (only `HookEventName` literal differs), both have `AdditionalContext *string` (omitempty); `_SubagentContextMixin` fields (`agent_id`/`agent_type`) still deferred to Phase2 item #13 (Python PR #628)
+- `routeMcpMethod` in mcp.go carries `//nolint:gocyclo` - JSONRPC dispatch switch legitimately exceeds threshold; test assertions on its results must use ok-pattern guards (`v, ok := result["result"].(map[string]any); if !ok { t.Fatal(...) }`) rather than chained type assertions to satisfy staticcheck SA5011
 
 <!-- END AUTO-MANAGED -->
 
