@@ -76,6 +76,13 @@ func main() {
 	fmt.Println()
 	runFailureRecoveryExample()
 
+	// Example 5: Observing CLI notifications
+	fmt.Println()
+	fmt.Println("--- Example 5: Notification Hook ---")
+	fmt.Println("Hook: Observe CLI-emitted notifications via the generic WithHook API")
+	fmt.Println()
+	runNotificationExample()
+
 	fmt.Println()
 	fmt.Println("Hook system examples completed!")
 }
@@ -373,6 +380,70 @@ func runFailureRecoveryExample() {
 		}
 		fmt.Printf("Error: %v\n", err)
 	}
+}
+
+// runNotificationExample demonstrates observing CLI-emitted notifications.
+//
+// The Notification event fires when the CLI surfaces a system-level notification
+// (e.g., permission prompts, rate-limit warnings). Unlike Pre/PostToolUse, there
+// is no user-controlled way to force-trigger one from a single query - the hook
+// observes whatever the CLI decides to notify about during the session.
+//
+// Registered via generic WithHook because no convenience helper exists for this event.
+func runNotificationExample() {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	notificationHook := claudecode.WithHook(
+		claudecode.HookEventNotification,
+		"", // matcher unused for non-tool events
+		notificationCallback,
+	)
+
+	fmt.Println("Running a query; any CLI notifications will be observed by the hook...")
+
+	err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
+		if err := client.Query(ctx, "Briefly summarize the current directory."); err != nil {
+			return err
+		}
+		return streamResponse(ctx, client)
+	}, notificationHook, claudecode.WithMaxTurns(2), claudecode.WithCwd(exampleDir()))
+
+	if err != nil {
+		if cliErr := claudecode.AsCLINotFoundError(err); cliErr != nil {
+			fmt.Printf("Claude CLI not found: %v\n", cliErr)
+			fmt.Println("Install with: npm install -g @anthropic-ai/claude-code")
+			return
+		}
+		if connErr := claudecode.AsConnectionError(err); connErr != nil {
+			fmt.Printf("Connection failed: %v\n", connErr)
+			return
+		}
+		fmt.Printf("Error: %v\n", err)
+	}
+}
+
+// notificationCallback is the Notification handler for runNotificationExample.
+// Logs the notification fields with a nil-guard on the optional Title.
+func notificationCallback(
+	_ context.Context,
+	input any,
+	_ *string,
+	_ claudecode.HookContext,
+) (claudecode.HookJSONOutput, error) {
+	notif, ok := input.(*claudecode.NotificationHookInput)
+	if !ok {
+		return claudecode.HookJSONOutput{}, nil
+	}
+
+	title := "(none)"
+	if notif.Title != nil {
+		title = *notif.Title
+	}
+	fmt.Printf("  [NOTIFY] type=%s title=%q message=%q\n",
+		notif.NotificationType, title, truncate(notif.Message, 80))
+
+	return claudecode.HookJSONOutput{}, nil
 }
 
 // recoveryCallback is the PostToolUseFailure handler for runFailureRecoveryExample.
