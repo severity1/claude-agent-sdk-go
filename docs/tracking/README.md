@@ -147,4 +147,4 @@ Not applicable to Go SDK. Listed for completeness so nothing falls through crack
 1. **Starting work:** Set Go Status to `in-progress` for the current row
 2. **PR merged:** Set Go Status to `done`, fill Go PR column with `#N`
 3. **Not applicable:** Set Go Status to `skip`, add reason in Notes
-4. **New Python PRs (after April 12, 2026):** Append rows to Phase 4 (or create Phase 5) in merge order, update snapshot date
+4. **New Python PRs (after April 12, 2026):** Add the row to [post-snapshot.md](post-snapshot.md) using the next available `P` prefix (P1, P2, ...). The snapshot date in this file stays Apr 12, 2026 - it bounds Phases 1-4 as the canonical record.
