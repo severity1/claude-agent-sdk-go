@@ -30,7 +30,7 @@ go test -count=3 -run TestClient  # Run tests multiple times for consistency
 make bench                        # Run benchmarks
 
 # Code quality (run before commits)
-go fmt ./...                      # Format code
+gofmt -s -w .                     # Format code (CI uses `gofmt -s`; plain `go fmt ./...` omits -s and fails CI)
 go vet ./...                      # Static analysis
 golangci-lint run                 # Comprehensive linting
 gocyclo -over 15 .                # Cyclomatic complexity check

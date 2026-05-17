@@ -8,12 +8,12 @@
 // - Integration with existing Go libraries and data structures
 //
 // Key components:
-// - NewTool: Creates tool definitions (Go alternative to Python's @tool decorator)
-// - WithToolAnnotations: Attaches MCP-spec behavioral hints to a tool
-//   (title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint)
-// - CreateSDKMcpServer: Creates an MCP server instance with tools
-// - WithSdkMcpServer: Adds the server to the client configuration
-// - Tool naming: mcp__<server_name>__<tool_name> format for AllowedTools
+//   - NewTool: Creates tool definitions (Go alternative to Python's @tool decorator)
+//   - WithToolAnnotations: Attaches MCP-spec behavioral hints to a tool
+//     (title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint)
+//   - CreateSDKMcpServer: Creates an MCP server instance with tools
+//   - WithSdkMcpServer: Adds the server to the client configuration
+//   - Tool naming: mcp__<server_name>__<tool_name> format for AllowedTools
 //
 // Run: go run main.go
 package main
