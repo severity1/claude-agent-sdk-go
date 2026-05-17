@@ -20,6 +20,7 @@ subprocess/
 ├── io_test.go            # I/O and stderr callback tests
 ├── process_test.go       # Process termination tests
 ├── config_test.go        # Environment and MCP config tests
+├── agents_test.go        # agentsToMap stripping and protocol options wiring tests
 ├── protocol_adapter.go   # ProtocolAdapter for control.Transport interface
 └── protocol_adapter_test.go # Adapter tests
 ```
