@@ -2,13 +2,15 @@ package claudecode
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
 
-// TestQuerySendsPromptAsUserMessage verifies Python SDK PR #468 wire shape:
-// the prompt is written as a user-message JSON line on stdin after init,
-// with role/content nested under "message" and ParentToolUseID nil.
+// TestQuerySendsPromptAsUserMessage pins the prompt-line wire shape: a
+// user-message JSON object that always carries `session_id` and
+// `parent_tool_use_id` keys (matching the TypeScript SDK), with role and
+// content nested under `message`.
 func TestQuerySendsPromptAsUserMessage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -50,6 +52,30 @@ func TestQuerySendsPromptAsUserMessage(t *testing.T) {
 	}
 	if msgMap["content"] != "What is 2+2?" {
 		t.Errorf("message.content = %v, want \"What is 2+2?\"", msgMap["content"])
+	}
+
+	// Wire-bytes assertion: the JSON line the CLI would receive must carry
+	// both `session_id` (empty string) and `parent_tool_use_id` (null) keys,
+	// matching the TypeScript and Python SDKs.
+	raw, err := json.Marshal(sent)
+	if err != nil {
+		t.Fatalf("json.Marshal(sent): %v", err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatalf("json.Unmarshal: %v (raw=%s)", err, raw)
+	}
+	sessionVal, ok := wire["session_id"]
+	if !ok {
+		t.Errorf("wire JSON missing `session_id` key: %s", raw)
+	} else if sessionVal != "" {
+		t.Errorf("wire `session_id` = %v, want \"\"", sessionVal)
+	}
+	parentVal, ok := wire["parent_tool_use_id"]
+	if !ok {
+		t.Errorf("wire JSON missing `parent_tool_use_id` key: %s", raw)
+	} else if parentVal != nil {
+		t.Errorf("wire `parent_tool_use_id` = %v, want null", parentVal)
 	}
 }
 

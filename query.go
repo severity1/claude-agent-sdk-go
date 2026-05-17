@@ -15,7 +15,7 @@ var ErrNoMoreMessages = errors.New("no more messages")
 
 // Query executes a one-shot query with automatic cleanup.
 // The prompt is written to stdin as a user-message JSON line after the
-// initialize handshake, matching Python SDK PR #468 and the TypeScript SDK.
+// initialize handshake, matching the TypeScript SDK behavior.
 func Query(ctx context.Context, prompt string, opts ...Option) (MessageIterator, error) {
 	options := NewOptions(opts...)
 

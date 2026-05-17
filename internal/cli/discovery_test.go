@@ -40,8 +40,8 @@ func TestCLIDiscovery(t *testing.T) {
 }
 
 // TestCommandBuilding tests CLI command construction with various options.
-// Streaming mode is unconditional (Python SDK PR #468 parity), so commands
-// always carry --input-format stream-json and never --print.
+// Streaming mode is unconditional, so commands always carry
+// --input-format stream-json and never --print.
 func TestCommandBuilding(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -77,8 +77,8 @@ func TestCommandBuilding(t *testing.T) {
 	}
 }
 
-// TestBuildCommandAlwaysUsesStreamJSON pins Python SDK PR #468: every
-// constructed command uses --input-format stream-json and never --print.
+// TestBuildCommandAlwaysUsesStreamJSON pins that every constructed command
+// uses --input-format stream-json and never --print.
 func TestBuildCommandAlwaysUsesStreamJSON(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -98,8 +98,8 @@ func TestBuildCommandAlwaysUsesStreamJSON(t *testing.T) {
 	}
 }
 
-// TestBuildCommandNeverEmitsAgentsFlag pins Python SDK PR #468: agents
-// travel via the initialize control request, not the --agents CLI flag.
+// TestBuildCommandNeverEmitsAgentsFlag pins that agents travel via the
+// initialize control request, not the --agents CLI flag.
 func TestBuildCommandNeverEmitsAgentsFlag(t *testing.T) {
 	options := &shared.Options{
 		Agents: map[string]shared.AgentDefinition{
