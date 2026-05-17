@@ -18,11 +18,12 @@ control/
 ├── permissions.go         # Permission callback handling, response building
 ├── types.go               # Request/Response types, Initialize handshake
 ├── types_hook.go          # Hook event types, HookMatcher, HookCallback
-├── protocol_test.go       # Protocol unit tests
-├── protocol_bench_test.go # Performance benchmarks
-├── hooks_test.go          # Hook system tests
-├── mcp_test.go            # MCP server tests
-└── types_hook_test.go     # Hook type tests
+├── protocol_test.go          # Protocol unit tests
+├── protocol_bench_test.go    # Performance benchmarks
+├── hooks_test.go             # Hook system tests
+├── mcp_test.go               # MCP server tests
+├── types_hook_test.go        # Hook type tests
+└── initialize_agents_test.go # Agents field in InitializeRequest tests
 ```
 
 **Protocol Flow**:
