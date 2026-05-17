@@ -42,7 +42,6 @@ const McpServerTypeSdk = shared.McpServerTypeSdk
 type McpToolHandler func(ctx context.Context, args map[string]any) (*McpToolResult, error)
 
 // McpTool represents a tool for SDK MCP servers.
-// This is the Go alternative to Python's @tool decorator.
 //
 // Create tools using NewTool() for proper initialization.
 type McpTool struct {
@@ -76,7 +75,6 @@ func WithToolAnnotations(ann *ToolAnnotations) ToolOption {
 }
 
 // NewTool creates a new MCP tool definition.
-// This is the Go-idiomatic alternative to Python's @tool decorator.
 //
 // Example:
 //

@@ -143,8 +143,9 @@ func (p *Protocol) sendMcpResponse(ctx context.Context, requestID string, mcpRes
 }
 
 // buildToolsListResult builds the JSONRPC tools/list response payload from a
-// slice of tool definitions. Pulled out of routeMcpMethod to keep the dispatch
-// switch under the gocyclo budget and to isolate wire-format shaping.
+// slice of tool definitions. Kept standalone from the routeMcpMethod dispatch
+// switch so the switch stays within the gocyclo budget, and so additions to
+// the response shape do not perturb method-dispatch logic.
 func buildToolsListResult(tools []McpToolDefinition, msgID any) (map[string]any, error) {
 	toolsData := make([]map[string]any, len(tools))
 	for i, t := range tools {
