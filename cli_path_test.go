@@ -71,7 +71,7 @@ func TestCreateQueryTransportHonorsWithCLIPath(t *testing.T) {
 
 	options := NewOptions(WithCLIPath("/totally/made/up/path/to/claude"))
 
-	transport, err := createQueryTransport("test prompt", options)
+	transport, err := createQueryTransport(options)
 	if err != nil {
 		t.Fatalf("createQueryTransport returned error with WithCLIPath set: %v", err)
 	}

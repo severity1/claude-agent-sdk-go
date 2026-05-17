@@ -16,6 +16,14 @@ func (t *Transport) handleStdout() {
 	defer close(t.msgChan)
 	defer close(t.errChan)
 	defer t.validator.MarkStreamEnd() // Mark stream end for validation
+	// Capture channel locally so reassignment on a subsequent Connect()
+	// doesn't race with this defer.
+	stdoutDone := t.stdoutDone
+	defer func() {
+		if stdoutDone != nil {
+			close(stdoutDone)
+		}
+	}()
 
 	scanner := bufio.NewScanner(t.stdout)
 
@@ -179,16 +187,13 @@ func (t *Transport) setupStderr() error {
 }
 
 // setupIoPipes configures stdin, stdout, and stderr pipes for the subprocess.
-// For streaming mode, creates a stdin pipe for sending messages. Always creates
-// stdout pipe for receiving responses. Stderr is configured via setupStderr.
+// Stdin is always opened so the SDK can write the initialize handshake and
+// subsequent user messages. Stderr is configured via setupStderr.
 func (t *Transport) setupIoPipes() error {
 	var err error
-	if t.promptArg == nil {
-		// Only create stdin pipe if we need to send messages via stdin
-		t.stdin, err = t.cmd.StdinPipe()
-		if err != nil {
-			return fmt.Errorf("failed to create stdin pipe: %w", err)
-		}
+	t.stdin, err = t.cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
 
 	t.stdout, err = t.cmd.StdoutPipe()
@@ -196,7 +201,6 @@ func (t *Transport) setupIoPipes() error {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
-	// Handle stderr configuration
 	if err := t.setupStderr(); err != nil {
 		return err
 	}

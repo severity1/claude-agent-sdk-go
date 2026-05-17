@@ -80,29 +80,10 @@ func BenchmarkBuildCommand(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				result := BuildCommand(cliPath, tc.options, false)
+				result := BuildCommand(cliPath, tc.options)
 				sink = result
 			}
 		})
-	}
-}
-
-// BenchmarkBuildCommandWithPrompt measures command construction with prompt argument.
-func BenchmarkBuildCommandWithPrompt(b *testing.B) {
-	cliPath := "/usr/bin/claude"
-	model := "claude-sonnet-4-5"
-	prompt := "Hello, world!"
-
-	options := &shared.Options{
-		Model: &model,
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		result := BuildCommandWithPrompt(cliPath, options, prompt)
-		sink = result
 	}
 }
 

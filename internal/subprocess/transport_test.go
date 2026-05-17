@@ -105,8 +105,10 @@ func TestTransportErrorHandling(t *testing.T) {
 			operation: func(tr *Transport) error {
 				return tr.Connect(ctx)
 			},
-			expectError:   false, // Connection should succeed initially even if CLI fails
-			errorContains: "",
+			// Initialize is unconditional now (Python SDK PR #468 parity), so a
+			// failing CLI surfaces an error from Connect instead of succeeding.
+			expectError:   true,
+			errorContains: "initialize",
 		},
 		{
 			name: "send_to_disconnected_transport",
@@ -370,8 +372,17 @@ timeout /t 1 /nobreak > NUL
 		default:
 			script = `@echo off
 if "%1"=="-v" (echo 3.0.0 & exit /b 0)
+setlocal enabledelayedexpansion
 echo {"type":"assistant","content":[{"type":"text","text":"Mock response"}],"model":"claude-3"}
-timeout /t 1 /nobreak > NUL
+:loop
+set /p line=
+if "!line!"=="" goto end
+echo !line! | findstr /C:"control_request" > nul
+if %errorlevel%==0 (
+    for /f "tokens=2 delims=:" %%a in ('echo !line! ^| findstr /o /c:"request_id"') do echo {"type":"control_response","response":{"subtype":"success","request_id":"req_1_mock","response":{}}}
+)
+goto loop
+:end
 `
 		}
 	} else {
@@ -391,35 +402,70 @@ if [ "$1" = "-v" ]; then echo "3.0.0"; exit 0; fi
 # Ignore SIGTERM initially to test 5-second timeout
 trap 'echo "Received SIGTERM, ignoring for 6 seconds"; sleep 6; exit 1' TERM
 echo '{"type":"assistant","content":[{"type":"text","text":"Long running mock"}],"model":"claude-3"}'
-sleep 30  # Run long enough to test termination
+# Read stdin and respond to control requests, keeping the process alive long
+# enough for termination tests. Reading is the natural keep-alive: blocks until
+# stdin closes (Transport.Close) and lets the trap fire on SIGTERM.
+while IFS= read -r line; do
+    if [[ "$line" == *"control_request"* ]]; then
+        req_id=$(echo "$line" | grep -o '"request_id":"[^"]*"' | cut -d'"' -f4)
+        [ -z "$req_id" ] && req_id="req_1_mock"
+        echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$req_id\",\"response\":{}}}"
+    fi
+done
 `
 		case opts.checkEnvironment:
 			script = `#!/bin/bash
 # Handle -v flag for version check
 if [ "$1" = "-v" ]; then echo "3.0.0"; exit 0; fi
-if [ "$CLAUDE_CODE_ENTRYPOINT" = "sdk-go" ]; then
-    echo '{"type":"assistant","content":[{"type":"text","text":"Environment OK"}],"model":"claude-3"}'
-else
+if [ "$CLAUDE_CODE_ENTRYPOINT" != "sdk-go" ] && [ "$CLAUDE_CODE_ENTRYPOINT" != "sdk-go-client" ]; then
     echo "Missing environment variable" >&2
     exit 1
 fi
-sleep 0.5
+echo '{"type":"assistant","content":[{"type":"text","text":"Environment OK"}],"model":"claude-3"}'
+while IFS= read -r line; do
+    if [[ "$line" == *"control_request"* ]]; then
+        req_id=$(echo "$line" | grep -o '"request_id":"[^"]*"' | cut -d'"' -f4)
+        [ -z "$req_id" ] && req_id="req_1_mock"
+        echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$req_id\",\"response\":{}}}"
+    fi
+done
 `
 		case opts.invalidOutput:
 			script = `#!/bin/bash
 # Handle -v flag for version check
 if [ "$1" = "-v" ]; then echo "3.0.0"; exit 0; fi
+# Respond to control requests FIRST so initialize completes before invalid
+# lines can corrupt the parser's speculative-parse buffer.
+read -r line
+if [[ "$line" == *"control_request"* ]]; then
+    req_id=$(echo "$line" | grep -o '"request_id":"[^"]*"' | cut -d'"' -f4)
+    [ -z "$req_id" ] && req_id="req_1_mock"
+    echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$req_id\",\"response\":{}}}"
+fi
 echo "This is not valid JSON output"
 echo '{"invalid": json}'
 echo '{"type":"assistant","content":[{"type":"text","text":"Valid after invalid"}],"model":"claude-3"}'
-sleep 0.5
+while IFS= read -r line; do
+    if [[ "$line" == *"control_request"* ]]; then
+        req_id=$(echo "$line" | grep -o '"request_id":"[^"]*"' | cut -d'"' -f4)
+        [ -z "$req_id" ] && req_id="req_1_mock"
+        echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$req_id\",\"response\":{}}}"
+    fi
+done
 `
 		default:
 			script = `#!/bin/bash
 # Handle -v flag for version check
 if [ "$1" = "-v" ]; then echo "3.0.0"; exit 0; fi
 echo '{"type":"assistant","content":[{"type":"text","text":"Mock response"}],"model":"claude-3"}'
-sleep 0.5
+# Respond to control requests on stdin so unconditional initialize succeeds
+while IFS= read -r line; do
+    if [[ "$line" == *"control_request"* ]]; then
+        req_id=$(echo "$line" | grep -o '"request_id":"[^"]*"' | cut -d'"' -f4)
+        [ -z "$req_id" ] && req_id="req_1_mock"
+        echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$req_id\",\"response\":{}}}"
+    fi
+done
 `
 		}
 	}
@@ -447,7 +493,7 @@ func setupTransportTestContext(t *testing.T, timeout time.Duration) (context.Con
 func setupTransportForTest(t *testing.T, cliPath string) *Transport {
 	t.Helper()
 	options := &shared.Options{}
-	return New(cliPath, options, false, "sdk-go")
+	return New(cliPath, options, "sdk-go")
 }
 
 func connectTransportSafely(ctx context.Context, t *testing.T, transport *Transport) {
@@ -480,39 +526,86 @@ func assertNoTransportError(t *testing.T, err error) {
 	}
 }
 
-// TestNewWithPrompt tests the NewWithPrompt constructor for one-shot queries
-func TestNewWithPrompt(t *testing.T) {
+// TestNewTransportStreamingDefaults verifies that the unified constructor
+// creates a streaming-mode transport (Python SDK PR #468 parity).
+func TestNewTransportStreamingDefaults(t *testing.T) {
 	tests := []struct {
-		name    string
-		prompt  string
-		options *shared.Options
+		name       string
+		entrypoint string
+		options    *shared.Options
 	}{
-		{"basic_prompt", "What is 2+2?", &shared.Options{}},
-		{"empty_prompt", "", nil},
-		{"multiline_prompt", "Line 1\nLine 2", &shared.Options{SystemPrompt: stringPtr("test")}},
+		{"sdk_go_entrypoint_empty_options", "sdk-go", &shared.Options{}},
+		{"sdk_go_client_entrypoint_nil_options", "sdk-go-client", nil},
+		{"sdk_go_with_system_prompt", "sdk-go", &shared.Options{SystemPrompt: stringPtr("test")}},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			transport := NewWithPrompt("/usr/bin/claude", test.options, test.prompt)
+			transport := New("/usr/bin/claude", test.options, test.entrypoint)
 
 			if transport == nil {
 				t.Fatal("Expected transport to be created, got nil")
 				return
 			}
-
-			// Verify key configuration
-			if transport.entrypoint != "sdk-go" {
-				t.Errorf("Expected entrypoint 'sdk-go', got %q", transport.entrypoint)
-			}
-			if !transport.closeStdin {
-				t.Error("Expected closeStdin to be true")
-			}
-			if transport.promptArg == nil || *transport.promptArg != test.prompt {
-				t.Errorf("Expected promptArg %q, got %v", test.prompt, transport.promptArg)
+			if transport.entrypoint != test.entrypoint {
+				t.Errorf("Expected entrypoint %q, got %q", test.entrypoint, transport.entrypoint)
 			}
 			assertTransportConnected(t, transport, false)
 		})
+	}
+}
+
+// TestConnectAlwaysUsesStreamingMode verifies that Connect builds a streaming
+// command and starts the control protocol, even when no hooks/permissions
+// /MCP are configured (Python SDK PR #468 parity).
+func TestConnectAlwaysUsesStreamingMode(t *testing.T) {
+	ctx, cancel := setupTransportTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := setupTransportForTest(t, newTransportMockCLIWithControlProtocol())
+	defer disconnectTransportSafely(t, transport)
+
+	if err := transport.Connect(ctx); err != nil {
+		t.Skipf("Mock CLI control protocol not available: %v", err)
+		return
+	}
+
+	assertTransportConnected(t, transport, true)
+
+	// The control protocol must be initialized so the agents field can flow.
+	if transport.protocol == nil {
+		t.Fatal("Expected control protocol to be initialized even without hooks/MCP")
+	}
+}
+
+// TestEndInputClosesStdinWriteOnly verifies that EndInput closes the stdin
+// write side without tearing down the transport.
+func TestEndInputClosesStdinWriteOnly(t *testing.T) {
+	ctx, cancel := setupTransportTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := setupTransportForTest(t, newTransportMockCLIWithControlProtocol())
+	defer disconnectTransportSafely(t, transport)
+
+	if err := transport.Connect(ctx); err != nil {
+		t.Skipf("Mock CLI control protocol not available: %v", err)
+		return
+	}
+
+	if err := transport.EndInput(ctx); err != nil {
+		t.Fatalf("EndInput returned error: %v", err)
+	}
+
+	transport.mu.RLock()
+	stdinAfter := transport.stdin
+	transport.mu.RUnlock()
+	if stdinAfter != nil {
+		t.Error("Expected transport.stdin to be nil after EndInput")
+	}
+
+	// Idempotent: calling EndInput again must not error.
+	if err := transport.EndInput(ctx); err != nil {
+		t.Errorf("Second EndInput returned error: %v", err)
 	}
 }
 
@@ -539,7 +632,7 @@ func TestTransportConnectErrorPaths(t *testing.T) {
 			name: "invalid_working_directory",
 			setup: func() *Transport {
 				options := &shared.Options{Cwd: stringPtr("/nonexistent/directory/path")}
-				return New(newTransportMockCLI(), options, false, "sdk-go")
+				return New(newTransportMockCLI(), options, "sdk-go")
 			},
 			wantError: true,
 		},
@@ -572,14 +665,13 @@ func TestTransportSendMessageEdgeCases(t *testing.T) {
 	ctx, cancel := setupTransportTestContext(t, 5*time.Second)
 	defer cancel()
 
-	// Test SendMessage with promptArg transport (one-shot mode)
-	t.Run("send_message_with_prompt_arg", func(t *testing.T) {
-		transport := NewWithPrompt(newTransportMockCLI(), &shared.Options{}, "test prompt")
+	// Test SendMessage writes to stdin always (no more one-shot no-op)
+	t.Run("send_message_writes_to_stdin_always", func(t *testing.T) {
+		transport := setupTransportForTest(t, newTransportMockCLI())
 		defer disconnectTransportSafely(t, transport)
 
 		connectTransportSafely(ctx, t, transport)
 
-		// Should be no-op since prompt is already passed as CLI argument
 		message := shared.StreamMessage{Type: "user", SessionID: "test"}
 		err := transport.SendMessage(ctx, message)
 		assertNoTransportError(t, err)
@@ -677,31 +769,6 @@ func TestTransportControlProtocolIntegration(t *testing.T) {
 		errSubstr   string
 		skipWindows bool // Skip on Windows due to batch script limitations
 	}{
-		{
-			name: "SetModel_requires_streaming_mode",
-			setup: func() *Transport {
-				// One-shot mode (closeStdin=true) should not support SetModel
-				return NewWithPrompt(newTransportMockCLI(), &shared.Options{}, "test prompt")
-			},
-			operation: func(ctx context.Context, t *Transport) error {
-				model := testModelName
-				return t.SetModel(ctx, &model)
-			},
-			wantErr:   true,
-			errSubstr: "one-shot mode",
-		},
-		{
-			name: "SetPermissionMode_requires_streaming_mode",
-			setup: func() *Transport {
-				// One-shot mode (closeStdin=true) should not support SetPermissionMode
-				return NewWithPrompt(newTransportMockCLI(), &shared.Options{}, "test prompt")
-			},
-			operation: func(ctx context.Context, t *Transport) error {
-				return t.SetPermissionMode(ctx, "accept_edits")
-			},
-			wantErr:   true,
-			errSubstr: "one-shot mode",
-		},
 		{
 			name: "SetModel_requires_connection",
 			setup: func() *Transport {

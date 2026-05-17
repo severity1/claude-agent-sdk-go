@@ -19,8 +19,7 @@ cli/
 
 **Key Functions**:
 - `FindCLI()`: Searches PATH and platform-specific locations for Claude CLI
-- `BuildCommand()`: Constructs CLI arguments from Options
-- `BuildCommandWithPrompt()`: Constructs CLI command for one-shot queries; prompt appended last after all flags so CLI parses flags (e.g. `--mcp-config`) correctly
+- `BuildCommand()`: Constructs CLI arguments from Options. Always emits `--input-format stream-json` (Python SDK PR #468 parity); never `--print` or `--agents` - prompts ride on stdin after the initialize handshake, and agents ride on the initialize control request
 - `GetCLIVersion()`: Extracts and validates CLI version
 
 <!-- END AUTO-MANAGED -->

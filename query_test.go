@@ -534,7 +534,8 @@ func TestCreateQueryTransport(t *testing.T) {
 			defer cleanup()
 
 			// Call createQueryTransport directly - this will exercise the real function
-			transport, err := createQueryTransport(test.prompt, test.options)
+			_ = test.prompt
+			transport, err := createQueryTransport(test.options)
 
 			if test.expectError {
 				if err == nil {
