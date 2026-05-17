@@ -91,6 +91,11 @@ type InitializeRequest struct {
 	// Hooks contains hook registrations keyed by event type.
 	// Format: {"PreToolUse": [...], "PostToolUse": [...]}
 	Hooks map[string][]HookMatcherConfig `json:"hooks,omitempty"`
+	// Agents contains agent definitions keyed by name, sent via stdin
+	// to bypass platform ARG_MAX limits. The value for each agent is a
+	// map of agent fields (description, prompt, tools, model) with
+	// None/empty fields stripped (Python omitempty parity).
+	Agents map[string]any `json:"agents,omitempty"`
 }
 
 // InitializeResponse contains the CLI's response to initialization.

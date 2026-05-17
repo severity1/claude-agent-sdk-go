@@ -79,9 +79,7 @@ func (t *Transport) GetValidator() *shared.StreamValidator {
 	return t.validator
 }
 
-// SetModel changes the AI model during a streaming session.
-// This method requires control protocol integration which is only available
-// in streaming mode (when closeStdin is false).
+// SetModel changes the AI model during an active session.
 func (t *Transport) SetModel(ctx context.Context, model *string) error {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -89,23 +87,14 @@ func (t *Transport) SetModel(ctx context.Context, model *string) error {
 	if !t.connected {
 		return fmt.Errorf("transport not connected")
 	}
-
-	// Control protocol integration is only available in streaming mode
-	if t.closeStdin {
-		return fmt.Errorf("SetModel not available in one-shot mode")
-	}
-
-	// Delegate to control protocol
 	if t.protocol == nil {
-		return fmt.Errorf("control protocol not initialized")
+		return fmt.Errorf("internal error: transport connected but control protocol is nil")
 	}
 
 	return t.protocol.SetModel(ctx, model)
 }
 
-// SetPermissionMode changes the permission mode during a streaming session.
-// This method requires control protocol integration which is only available
-// in streaming mode (when closeStdin is false).
+// SetPermissionMode changes the permission mode during an active session.
 func (t *Transport) SetPermissionMode(ctx context.Context, mode shared.PermissionMode) error {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -113,24 +102,15 @@ func (t *Transport) SetPermissionMode(ctx context.Context, mode shared.Permissio
 	if !t.connected {
 		return fmt.Errorf("transport not connected")
 	}
-
-	// Control protocol integration is only available in streaming mode
-	if t.closeStdin {
-		return fmt.Errorf("SetPermissionMode not available in one-shot mode")
-	}
-
-	// Delegate to control protocol
 	if t.protocol == nil {
-		return fmt.Errorf("control protocol not initialized")
+		return fmt.Errorf("internal error: transport connected but control protocol is nil")
 	}
 
 	return t.protocol.SetPermissionMode(ctx, string(mode))
 }
 
 // RewindFiles reverts tracked files to their state at a specific user message.
-// This method requires control protocol integration which is only available
-// in streaming mode (when closeStdin is false).
-// Returns error if not connected, not in streaming mode, or protocol not initialized.
+// Requires file checkpointing to have been enabled when creating the client.
 func (t *Transport) RewindFiles(ctx context.Context, userMessageID string) error {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -138,23 +118,14 @@ func (t *Transport) RewindFiles(ctx context.Context, userMessageID string) error
 	if !t.connected {
 		return fmt.Errorf("transport not connected")
 	}
-
-	// Control protocol integration is only available in streaming mode
-	if t.closeStdin {
-		return fmt.Errorf("RewindFiles not available in one-shot mode")
-	}
-
-	// Delegate to control protocol
 	if t.protocol == nil {
-		return fmt.Errorf("control protocol not initialized")
+		return fmt.Errorf("internal error: transport connected but control protocol is nil")
 	}
 
 	return t.protocol.RewindFiles(ctx, userMessageID)
 }
 
 // GetMcpStatus returns the connection status of all configured MCP servers.
-// This method requires control protocol integration which is only available
-// in streaming mode (when closeStdin is false).
 func (t *Transport) GetMcpStatus(ctx context.Context) (*control.McpStatusResponse, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -162,11 +133,6 @@ func (t *Transport) GetMcpStatus(ctx context.Context) (*control.McpStatusRespons
 	if !t.connected {
 		return nil, fmt.Errorf("transport not connected")
 	}
-
-	if t.closeStdin {
-		return nil, fmt.Errorf("GetMcpStatus not available in one-shot mode")
-	}
-
 	if t.protocol == nil {
 		return nil, fmt.Errorf("internal error: transport connected but control protocol is nil")
 	}
@@ -177,74 +143,94 @@ func (t *Transport) GetMcpStatus(ctx context.Context) (*control.McpStatusRespons
 // buildProtocolOptions constructs control protocol options from transport configuration.
 func (t *Transport) buildProtocolOptions() []control.ProtocolOption {
 	var opts []control.ProtocolOption
-
-	// Wire permission callback if configured
-	if t.options != nil && t.options.CanUseTool != nil {
-		// Create adapter that converts between shared.Options (any types)
-		// and control package (strongly-typed) to avoid import cycles
-		optionsCallback := t.options.CanUseTool
-		opts = append(opts,
-			control.WithCanUseToolCallback(func(
-				ctx context.Context,
-				toolName string,
-				input map[string]any,
-				permCtx control.ToolPermissionContext,
-			) (control.PermissionResult, error) {
-				// Call the Options callback with any-typed permCtx
-				result, err := optionsCallback(ctx, toolName, input, permCtx)
-				if err != nil {
-					return nil, err
-				}
-
-				// Convert result back to strongly-typed PermissionResult
-				if pr, ok := result.(control.PermissionResult); ok {
-					return pr, nil
-				}
-
-				// Fallback: deny if result type is unexpected
-				fmt.Fprintf(os.Stderr, "claude-agent-sdk: CanUseTool callback returned unexpected type %T, denying\n", result)
-				return control.NewPermissionResultDeny("invalid permission result type"), nil
-			}))
+	if t.options == nil {
+		return opts
 	}
 
-	// Wire hooks if configured
-	if t.options != nil && t.options.Hooks != nil {
-		// Convert from any to strongly-typed hooks map
-		if hooks, ok := t.options.Hooks.(map[control.HookEvent][]control.HookMatcher); ok {
-			opts = append(opts, control.WithHooks(hooks))
-		} else {
-			fmt.Fprintf(os.Stderr, "claude-agent-sdk: Hooks option has unexpected type %T, hooks will not be registered\n", t.options.Hooks)
-		}
+	if t.options.CanUseTool != nil {
+		opts = append(opts, control.WithCanUseToolCallback(t.canUseToolAdapter()))
 	}
-
-	// Wire SDK MCP servers to protocol.
-	if t.options != nil && len(t.options.McpServers) > 0 {
-		sdkServers := make(map[string]control.McpServer)
-		for name, config := range t.options.McpServers {
-			if sdkConfig, ok := config.(*shared.McpSdkServerConfig); ok && sdkConfig.Instance != nil {
-				sdkServers[name] = sdkConfig.Instance
-			}
-		}
-		if len(sdkServers) > 0 {
-			opts = append(opts, control.WithSdkMcpServers(sdkServers))
-		}
+	if hooksOpt := t.hooksProtocolOption(); hooksOpt != nil {
+		opts = append(opts, hooksOpt)
 	}
-
+	if mcpOpt := t.sdkMcpServersProtocolOption(); mcpOpt != nil {
+		opts = append(opts, mcpOpt)
+	}
+	if len(t.options.Agents) > 0 {
+		opts = append(opts, control.WithAgents(agentsToMap(t.options.Agents)))
+	}
 	return opts
 }
 
-// hasSdkMcpServers checks if any SDK MCP servers are configured.
-// Returns true if at least one SDK server with a valid Instance exists.
-func (t *Transport) hasSdkMcpServers() bool {
-	if t.options == nil || len(t.options.McpServers) == 0 {
-		return false
+// canUseToolAdapter wraps the user-facing CanUseTool callback (which uses
+// `any`-typed permCtx/result to avoid import cycles) in a strongly-typed
+// shim acceptable to control.WithCanUseToolCallback.
+func (t *Transport) canUseToolAdapter() control.CanUseToolCallback {
+	optionsCallback := t.options.CanUseTool
+	return func(ctx context.Context, toolName string, input map[string]any, permCtx control.ToolPermissionContext) (control.PermissionResult, error) {
+		result, err := optionsCallback(ctx, toolName, input, permCtx)
+		if err != nil {
+			return nil, err
+		}
+		if pr, ok := result.(control.PermissionResult); ok {
+			return pr, nil
+		}
+		fmt.Fprintf(os.Stderr, "claude-agent-sdk: CanUseTool callback returned unexpected type %T, denying\n", result)
+		return control.NewPermissionResultDeny("invalid permission result type"), nil
 	}
-	for _, config := range t.options.McpServers {
+}
+
+// hooksProtocolOption returns a ProtocolOption wiring up the hook map, or
+// nil when no hooks are configured or the type cast fails (with a warning).
+func (t *Transport) hooksProtocolOption() control.ProtocolOption {
+	if t.options.Hooks == nil {
+		return nil
+	}
+	hooks, ok := t.options.Hooks.(map[control.HookEvent][]control.HookMatcher)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "claude-agent-sdk: Hooks option has unexpected type %T, hooks will not be registered\n", t.options.Hooks)
+		return nil
+	}
+	return control.WithHooks(hooks)
+}
+
+// sdkMcpServersProtocolOption builds the in-process SDK MCP server map and
+// returns a ProtocolOption, or nil if no SDK servers are configured.
+func (t *Transport) sdkMcpServersProtocolOption() control.ProtocolOption {
+	if len(t.options.McpServers) == 0 {
+		return nil
+	}
+	sdkServers := make(map[string]control.McpServer)
+	for name, config := range t.options.McpServers {
 		if sdkConfig, ok := config.(*shared.McpSdkServerConfig); ok && sdkConfig.Instance != nil {
-			return true
+			sdkServers[name] = sdkConfig.Instance
 		}
 	}
-	return false
+	if len(sdkServers) == 0 {
+		return nil
+	}
+	return control.WithSdkMcpServers(sdkServers)
+}
+
+// agentsToMap converts the typed Options.Agents map into the
+// map[string]any shape consumed by the control protocol, stripping empty
+// optional fields (Python SDK omitempty parity).
+func agentsToMap(agents map[string]shared.AgentDefinition) map[string]any {
+	out := make(map[string]any, len(agents))
+	for name, agent := range agents {
+		entry := map[string]any{
+			"description": agent.Description,
+			"prompt":      agent.Prompt,
+		}
+		if len(agent.Tools) > 0 {
+			entry["tools"] = agent.Tools
+		}
+		if agent.Model != "" {
+			entry["model"] = string(agent.Model)
+		}
+		out[name] = entry
+	}
+	return out
 }
 
 // buildEnvironment constructs the environment variables for the subprocess.

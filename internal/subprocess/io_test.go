@@ -349,7 +349,7 @@ func TestStderrCallbackWithMockCLI(t *testing.T) {
 	cliPath := newTransportMockCLIWithStderr()
 	defer func() { _ = os.Remove(cliPath) }()
 
-	transport := New(cliPath, options, false, "sdk-go")
+	transport := New(cliPath, options, "sdk-go")
 	defer disconnectTransportSafely(t, transport)
 
 	err := transport.Connect(ctx)
@@ -390,7 +390,13 @@ if [ "$1" = "-v" ]; then echo "3.0.0"; exit 0; fi
 echo "Stderr line 1" >&2
 echo "Stderr line 2" >&2
 echo '{"type":"assistant","content":[{"type":"text","text":"Mock response"}],"model":"claude-3"}'
-sleep 0.5
+while IFS= read -r line; do
+    if [[ "$line" == *"control_request"* ]]; then
+        req_id=$(echo "$line" | grep -o '"request_id":"[^"]*"' | cut -d'"' -f4)
+        [ -z "$req_id" ] && req_id="req_1_mock"
+        echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$req_id\",\"response\":{}}}"
+    fi
+done
 `
 	}
 

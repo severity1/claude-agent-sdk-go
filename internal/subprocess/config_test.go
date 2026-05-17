@@ -139,19 +139,16 @@ func TestSubprocessEnvironmentVariables(t *testing.T) {
 			ctx, cancel := setupSubprocessTestContext(t)
 			defer cancel()
 
-			// Create transport with test options
-			transport := New("echo", tt.options, true, "sdk-go")
+			transport := New(newTransportMockCLI(), tt.options, "sdk-go")
 			defer func() {
 				if transport.IsConnected() {
 					_ = transport.Close()
 				}
 			}()
 
-			// Connect to build command with environment
 			err := transport.Connect(ctx)
 			assertNoTransportError(t, err)
 
-			// Validate environment variables were set correctly
 			if transport.cmd != nil && transport.cmd.Env != nil {
 				tt.validate(t, transport.cmd.Env)
 			} else {
@@ -178,7 +175,7 @@ func TestTransportWorkingDirectory(t *testing.T) {
 				options := &shared.Options{
 					Cwd: &cwd,
 				}
-				return New(newTransportMockCLI(), options, false, "sdk-go")
+				return New(newTransportMockCLI(), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -197,7 +194,7 @@ func TestTransportWorkingDirectory(t *testing.T) {
 				options := &shared.Options{
 					Cwd: nil,
 				}
-				return New(newTransportMockCLI(), options, false, "sdk-go")
+				return New(newTransportMockCLI(), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -250,7 +247,7 @@ func TestTransportMcpServerConfiguration(t *testing.T) {
 				options := &shared.Options{
 					McpServers: mcpServers,
 				}
-				return New(newTransportMockCLI(), options, false, "sdk-go")
+				return New(newTransportMockCLI(), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -299,7 +296,7 @@ func TestTransportMcpServerConfiguration(t *testing.T) {
 				options := &shared.Options{
 					McpServers: mcpServers,
 				}
-				return New(newTransportMockCLI(), options, false, "sdk-go")
+				return New(newTransportMockCLI(), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -331,7 +328,7 @@ func TestTransportMcpServerConfiguration(t *testing.T) {
 				options := &shared.Options{
 					McpServers: nil,
 				}
-				return New(newTransportMockCLI(), options, false, "sdk-go")
+				return New(newTransportMockCLI(), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -355,7 +352,7 @@ func TestTransportMcpServerConfiguration(t *testing.T) {
 					},
 				}
 				options := &shared.Options{McpServers: mcpServers}
-				return New(newTransportMockCLI(), options, false, "sdk-go")
+				return New(newTransportMockCLI(), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -398,7 +395,7 @@ func TestTransportMcpServerConfiguration(t *testing.T) {
 					},
 				}
 				options := &shared.Options{McpServers: mcpServers}
-				return New(newTransportMockCLI(), options, false, "sdk-go")
+				return New(newTransportMockCLI(), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -442,7 +439,7 @@ func TestTransportMcpServerConfiguration(t *testing.T) {
 					McpServers: mcpServers,
 					ExtraArgs:  map[string]*string{"existing": stringPtr("value")},
 				}
-				return New(newTransportMockCLI(), options, false, "sdk-go")
+				return New(newTransportMockCLI(), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()

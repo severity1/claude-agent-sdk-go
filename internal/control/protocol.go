@@ -61,6 +61,9 @@ type Protocol struct {
 	// SDK MCP servers for in-process tool handling
 	sdkMcpServers map[string]McpServer
 
+	// Agents to send via initialize request (Python SDK PR #468 parity).
+	agents map[string]any
+
 	// Background goroutine management
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -106,6 +109,15 @@ func WithHookCallbacks(callbacks map[string]HookCallback) ProtocolOption {
 func WithSdkMcpServers(servers map[string]McpServer) ProtocolOption {
 	return func(p *Protocol) {
 		p.sdkMcpServers = servers
+	}
+}
+
+// WithAgents configures agent definitions to be sent in the initialize request.
+// Agents travel via the control protocol over stdin, bypassing platform ARG_MAX
+// limits that previously broke large agent payloads when passed via --agents.
+func WithAgents(agents map[string]any) ProtocolOption {
+	return func(p *Protocol) {
+		p.agents = agents
 	}
 }
 
@@ -399,6 +411,10 @@ func (p *Protocol) Initialize(ctx context.Context) (*InitializeResponse, error) 
 		// Generate hook registrations and build hooks config
 		if p.hooks != nil {
 			initReq.Hooks = p.buildHooksConfig()
+		}
+
+		if len(p.agents) > 0 {
+			initReq.Agents = p.agents
 		}
 
 		// Send initialize request

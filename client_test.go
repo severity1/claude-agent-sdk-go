@@ -146,7 +146,7 @@ func TestClientQueryExecution(t *testing.T) {
 		t.Fatalf("Expected map[string]interface{}, got %T", sentMsg.Message)
 	}
 
-	if role, ok := messageMap["role"]; !ok || role != "user" {
+	if role, ok := messageMap["role"]; !ok || role != userMessageType {
 		t.Errorf("Expected message role 'user', got '%v'", role)
 	}
 	if content, ok := messageMap["content"]; !ok || content != "What is 2+2?" {
@@ -1945,7 +1945,7 @@ func TestClientPythonSDKCompatibility(t *testing.T) {
 	if !ok {
 		t.Fatalf("Expected Message to be map[string]interface{}, got %T", sentMsg.Message)
 	}
-	if role, ok := messageMap["role"]; !ok || role != "user" {
+	if role, ok := messageMap["role"]; !ok || role != userMessageType {
 		t.Errorf("Expected message role 'user', got '%v'", role)
 	}
 	if content, ok := messageMap["content"]; !ok || content != "Test streaming with Python SDK format" {
