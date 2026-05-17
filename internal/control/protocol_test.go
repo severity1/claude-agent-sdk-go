@@ -2045,6 +2045,7 @@ func TestHandleControlInitErr(t *testing.T) {
 	t.Run("unblocks_send_control_request", testInitErrUnblocksSendControlRequest)
 	t.Run("non_blocking_when_no_receiver", testInitErrNonBlockingNoReceiver)
 	t.Run("only_first_error_delivered", testInitErrOnlyFirstDelivered)
+	t.Run("noop_after_initialize_success", testInitErrNoopAfterInitialize)
 }
 
 func testInitErrUnblocksSendControlRequest(t *testing.T) {
@@ -2126,6 +2127,47 @@ func testInitErrOnlyFirstDelivered(t *testing.T) {
 		t.Errorf("expected empty channel, got: %v", err)
 	default:
 		// Good - empty
+	}
+}
+
+// testInitErrNoopAfterInitialize verifies the post-init guard: a late
+// stdoutDone watcher firing after Initialize succeeded must not poison
+// initErrChan for the next SendControlRequest.
+func testInitErrNoopAfterInitialize(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := setupControlTestContext(t, 3*time.Second)
+	defer cancel()
+
+	transport := newControlMockTransport()
+	protocol := NewProtocol(transport)
+	if err := protocol.Start(ctx); err != nil {
+		t.Fatalf("protocol.Start: %v", err)
+	}
+	defer func() { _ = protocol.Close() }()
+
+	go func() {
+		req, ok := transport.waitForFirstWrite(time.Now().Add(2 * time.Second))
+		if !ok {
+			return
+		}
+		transport.injectResponse(req.RequestID, map[string]any{
+			"supported_commands": []string{"initialize"},
+		})
+	}()
+
+	if _, err := protocol.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize returned error: %v", err)
+	}
+
+	// Late stdoutDone watcher fires here. The guard must drop the error.
+	protocol.HandleControlInitErr(fmt.Errorf("CLI exited after init"))
+
+	select {
+	case err := <-protocol.initErrChan:
+		t.Errorf("expected initErrChan to remain empty after successful Initialize, got: %v", err)
+	default:
+		// Empty - post-init guard worked.
 	}
 }
 

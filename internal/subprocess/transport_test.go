@@ -105,8 +105,8 @@ func TestTransportErrorHandling(t *testing.T) {
 			operation: func(tr *Transport) error {
 				return tr.Connect(ctx)
 			},
-			// Initialize is unconditional now (Python SDK PR #468 parity), so a
-			// failing CLI surfaces an error from Connect instead of succeeding.
+			// Initialize is unconditional now, so a failing CLI surfaces an
+			// error from Connect instead of succeeding.
 			expectError:   true,
 			errorContains: "initialize",
 		},
@@ -527,7 +527,7 @@ func assertNoTransportError(t *testing.T, err error) {
 }
 
 // TestNewTransportStreamingDefaults verifies that the unified constructor
-// creates a streaming-mode transport (Python SDK PR #468 parity).
+// creates a streaming-mode transport.
 func TestNewTransportStreamingDefaults(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -556,8 +556,8 @@ func TestNewTransportStreamingDefaults(t *testing.T) {
 }
 
 // TestConnectAlwaysUsesStreamingMode verifies that Connect builds a streaming
-// command and starts the control protocol, even when no hooks/permissions
-// /MCP are configured (Python SDK PR #468 parity).
+// command and starts the control protocol, even when no
+// hooks/permissions/MCP are configured.
 func TestConnectAlwaysUsesStreamingMode(t *testing.T) {
 	ctx, cancel := setupTransportTestContext(t, 5*time.Second)
 	defer cancel()

@@ -265,7 +265,17 @@ func (p *Protocol) SendControlRequest(ctx context.Context, request any, timeout 
 // HandleControlInitErr reports an initialization error back to any pending
 // SendControlRequest, unblocking it when the CLI returns an error result
 // instead of a control protocol response (e.g., invalid session ID).
+//
+// No-op once the handshake has succeeded: a late stdout-close notification
+// after a successful Initialize must not poison `initErrChan` for the next
+// SendControlRequest (e.g. SetModel/GetMcpStatus from a long-lived client).
 func (p *Protocol) HandleControlInitErr(err error) {
+	p.mu.Lock()
+	initialized := p.initialized
+	p.mu.Unlock()
+	if initialized {
+		return
+	}
 	select {
 	case p.initErrChan <- err:
 	default:
