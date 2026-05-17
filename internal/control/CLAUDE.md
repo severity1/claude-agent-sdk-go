@@ -42,7 +42,7 @@ control/
 - Thread safety: All state access protected by mutex
 - Timeout handling: Default 60s init timeout, configurable via `WithInitTimeout`
 - Hook registration: `RegisterHook()` returns callback ID for later removal
-- Init error channel: `initErrChan chan error` (buffered, size 1) in Protocol struct; `HandleControlInitErr()` sends non-blocking to unblock `SendControlRequest()` when CLI fails before handshake (e.g., invalid session ID)
+- Init error channel: `initErrChan chan error` (buffered, size 1) in Protocol struct; `HandleControlInitErr()` sends non-blocking to unblock `SendControlRequest()` when CLI fails before handshake (e.g., invalid session ID); reads `p.initialized` under lock first and is a no-op after `Initialize()` succeeds - prevents the post-init stdoutDone watcher from poisoning `initErrChan` for later `SendControlRequest` calls (e.g. `SetModel`/`GetMcpStatus` on a long-lived client)
 - Constructor pattern: `NewGetMcpStatusRequest()` sets `Subtype: SubtypeGetMcpStatus`; follows same pattern as `NewPermissionResultAllow/Deny`; use constructors for request types with fixed subtype values
 - SubtypeGetMcpStatus = `"mcp_status"` (wire value from Python SDK query.py); included in parity table in `testSubtypeConstants`
 - McpServerConfigType constants: `McpServerConfigTypeStdio/SSE/HTTP/SDK/ClaudeAI` discriminate `McpServerStatusConfig.Type`
