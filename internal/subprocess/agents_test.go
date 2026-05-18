@@ -6,9 +6,11 @@ import (
 	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
 
-// TestAgentsToMapStripsEmptyFields verifies that the helper preserves
-// Python SDK omit-empty semantics: nil/empty Tools and empty Model are
-// dropped from the per-agent map sent in the initialize request.
+// TestAgentsToMapStripsEmptyFields verifies the Go-side stripping rule:
+// description/prompt always emit; nil/empty Tools and empty Model are
+// dropped from the per-agent map sent in the initialize request. (Note:
+// this is stricter than Python's `if v is not None` rule, which would
+// preserve empty list and empty string. See agentsToMap docstring.)
 func TestAgentsToMapStripsEmptyFields(t *testing.T) {
 	agents := map[string]shared.AgentDefinition{
 		"full": {

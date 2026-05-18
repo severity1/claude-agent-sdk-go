@@ -48,6 +48,7 @@ subprocess/
 - Stdout-done channel: `stdoutDone chan struct{}` is allocated per Connect and closed by `handleStdout` on exit. The watcher goroutine and `handleStdout` capture the channel/protocol pointer into locals before reading to avoid races with a subsequent reconnect.
 - Nil protocol guard: `GetMcpStatus()` (and other control delegation methods) return descriptive error `"internal error: transport connected but control protocol is nil"` when `t.protocol == nil` after connected check
 - `buildProtocolOptions()` is split into per-feature helpers (`canUseToolAdapter`, `hooksProtocolOption`, `sdkMcpServersProtocolOption`) to stay under gocyclo 15. The `agents` wiring uses `control.WithAgents(agentsToMap(...))`; `agentsToMap` converts `shared.AgentDefinition` to `map[string]any` at the package boundary so `control` stays free of any `shared` dependency.
+- `agentsToMap` stripping rule (deliberate divergence from Python): `description` and `prompt` always emit; empty `Tools` slice and empty `Model` string are dropped. Python's rule (`if v is not None`) is more permissive - it preserves `tools=[]` and `model=""`. Go is stricter because `AgentDefinition` uses zero-value-as-unset semantics and there is no way for a caller to distinguish "explicit empty" from "unset" with the current field types. Phase 2 #19 (Python PR #684) will introduce nullable optional fields (skills/memory/mcpServers); at that point the per-field strip decision should be re-examined - description/prompt should keep their unconditional treatment.
 
 <!-- END AUTO-MANAGED -->
 

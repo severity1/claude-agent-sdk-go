@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	claudecode "github.com/severity1/claude-agent-sdk-go"
@@ -45,6 +46,12 @@ func main() {
 	fmt.Println("--- Example 3: Agent Model Options ---")
 	fmt.Println("Demonstrating available agent model constants...")
 	showAgentModelOptions()
+
+	// Example 4: Large Agent Payload (initialize-streaming smoke test)
+	fmt.Println()
+	fmt.Println("--- Example 4: Large Agent Payload ---")
+	fmt.Println("Registering a large agent payload that would previously hit ARG_MAX...")
+	runLargePayloadAgentsExample()
 
 	fmt.Println()
 	fmt.Println("Programmatic subagents example completed!")
@@ -138,6 +145,62 @@ func runMultipleAgentsExample() {
 	},
 		claudecode.WithAgents(agents),
 		claudecode.WithMaxTurns(2),
+	)
+
+	if err != nil {
+		if cliErr := claudecode.AsCLINotFoundError(err); cliErr != nil {
+			fmt.Printf("Claude CLI not found: %v\n", cliErr)
+			fmt.Println("Install with: npm install -g @anthropic-ai/claude-code")
+			return
+		}
+		if connErr := claudecode.AsConnectionError(err); connErr != nil {
+			fmt.Printf("Connection failed: %v\n", connErr)
+			return
+		}
+		fmt.Printf("Error: %v\n", err)
+	}
+}
+
+// runLargePayloadAgentsExample registers ~260 KB of agent definitions over the
+// initialize control request. A payload this size would exceed ARG_MAX if
+// passed via argv.
+func runLargePayloadAgentsExample() {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	const (
+		agentCount      = 20
+		promptSizeBytes = 13 * 1024
+		promptUnit      = "You are a specialist agent. Follow project conventions. "
+	)
+
+	repeatCount := promptSizeBytes / len(promptUnit)
+	basePrompt := strings.Repeat(promptUnit, repeatCount)
+
+	agents := make(map[string]claudecode.AgentDefinition, agentCount)
+	for i := 0; i < agentCount; i++ {
+		name := fmt.Sprintf("specialist-%02d", i)
+		agents[name] = claudecode.AgentDefinition{
+			Description: fmt.Sprintf("Specialist agent #%d for large-payload registration test.", i),
+			Prompt:      basePrompt,
+			Tools:       []string{"Read"},
+			Model:       claudecode.AgentModelInherit,
+		}
+	}
+
+	totalBytes := 0
+	for _, agent := range agents {
+		totalBytes += len(agent.Description) + len(agent.Prompt)
+	}
+	fmt.Printf("Registering %d agents, total payload ~%d KB.\n", len(agents), totalBytes/1024)
+	fmt.Println("Note: this would previously fail with E2BIG via --agents; now streams via initialize.")
+
+	err := claudecode.WithClient(ctx, func(_ claudecode.Client) error {
+		fmt.Println("Connected; agents registered via the initialize control request (no ARG_MAX error).")
+		return nil
+	},
+		claudecode.WithAgents(agents),
+		claudecode.WithMaxTurns(1),
 	)
 
 	if err != nil {

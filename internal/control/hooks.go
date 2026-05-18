@@ -246,6 +246,9 @@ func (p *Protocol) generateHookRegistrations() []HookRegistration {
 
 // buildHooksConfig creates the hooks config for the initialize request.
 // Format: {"PreToolUse": [{"matcher": "Bash", "hookCallbackIds": ["hook_0"]}], ...}
+//
+// Returns nil when no matchers register any callbacks, so the initialize
+// request emits `"hooks":null` rather than `"hooks":{}` for the empty case.
 func (p *Protocol) buildHooksConfig() map[string][]HookMatcherConfig {
 	if p.hooks == nil {
 		return nil
@@ -288,6 +291,9 @@ func (p *Protocol) buildHooksConfig() map[string][]HookMatcherConfig {
 	}
 	p.hookCallbacksMu.Unlock()
 
+	if len(config) == 0 {
+		return nil
+	}
 	return config
 }
 

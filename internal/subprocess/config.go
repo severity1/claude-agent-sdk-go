@@ -213,8 +213,15 @@ func (t *Transport) sdkMcpServersProtocolOption() control.ProtocolOption {
 }
 
 // agentsToMap converts the typed Options.Agents map into the
-// map[string]any shape consumed by the control protocol, stripping empty
-// optional fields (Python SDK omitempty parity).
+// map[string]any shape consumed by the control protocol.
+//
+// Stripping rule: description and prompt always emit (Go strings, no
+// nil/None distinction); empty Tools slice and empty Model string are
+// dropped. This is stricter than Python's `if v is not None` rule
+// (Python preserves empty list and empty string), but acceptable
+// because Go's AgentDefinition uses zero-value-as-unset semantics. The
+// per-field strip decision should be re-examined when AgentDefinition
+// gains nullable optional fields.
 func agentsToMap(agents map[string]shared.AgentDefinition) map[string]any {
 	out := make(map[string]any, len(agents))
 	for name, agent := range agents {

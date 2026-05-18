@@ -194,7 +194,7 @@ func controlEchoLoop(in *os.File, out *os.File) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if isControlRequest(line) {
-			fmt.Fprintln(out, buildControlResponse(extractRequestID(line)))
+			_, _ = fmt.Fprintln(out, buildControlResponse(extractRequestID(line)))
 		}
 	}
 }
