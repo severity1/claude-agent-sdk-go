@@ -58,22 +58,22 @@ func TestAgentsToMapStripsEmptyFields(t *testing.T) {
 }
 
 // TestBuildProtocolOptionsIncludesAgents pins the wiring: when Options.Agents
-// is populated, buildProtocolOptions appends a control.WithAgents option that
-// surfaces the agents in the eventual initialize request.
+// is populated, buildProtocolOptions appends exactly one additional option
+// (control.WithAgents) over the no-agents baseline. The end-to-end wire
+// assertion lives in internal/control/initialize_agents_test.go; this unit
+// test guards against accidental removal of the agents wiring in
+// buildProtocolOptions even when other options are also present.
 func TestBuildProtocolOptionsIncludesAgents(t *testing.T) {
-	options := &shared.Options{
+	baseline := New("/usr/bin/claude", &shared.Options{}, "sdk-go").buildProtocolOptions()
+	withAgents := New("/usr/bin/claude", &shared.Options{
 		Agents: map[string]shared.AgentDefinition{
-			"reviewer": {
-				Description: "Reviews code",
-				Prompt:      "You are a reviewer.",
-			},
+			"reviewer": {Description: "Reviews code", Prompt: "You are a reviewer."},
 		},
-	}
-	transport := New("/usr/bin/claude", options, "sdk-go")
+	}, "sdk-go").buildProtocolOptions()
 
-	opts := transport.buildProtocolOptions()
-	if len(opts) == 0 {
-		t.Fatal("expected at least one protocol option for agents wiring, got none")
+	if got, want := len(withAgents), len(baseline)+1; got != want {
+		t.Errorf("buildProtocolOptions with agents = %d opts, baseline = %d; want exactly %d (baseline + WithAgents)",
+			got, len(baseline), want)
 	}
 }
 

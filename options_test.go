@@ -872,6 +872,7 @@ func (m *mockTransportForOptions) ReceiveMessages(_ context.Context) (<-chan Mes
 	return nil, nil
 }
 func (m *mockTransportForOptions) Interrupt(_ context.Context) error           { return nil }
+func (m *mockTransportForOptions) EndInput(_ context.Context) error            { return nil }
 func (m *mockTransportForOptions) SetModel(_ context.Context, _ *string) error { return nil }
 func (m *mockTransportForOptions) SetPermissionMode(_ context.Context, _ PermissionMode) error {
 	return nil

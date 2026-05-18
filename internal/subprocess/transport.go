@@ -169,8 +169,11 @@ func (t *Transport) Connect(ctx context.Context) error {
 
 	// Set up control protocol and run the initialize handshake. Initialize
 	// is unconditional so the agents map can travel on the initialize
-	// request rather than via argv.
+	// request rather than via argv. Failure here means the subprocess is
+	// running but we cannot use it - tear down so the process is reaped
+	// and goroutines exit.
 	if err := t.setupControlProtocol(t.ctx); err != nil {
+		_ = t.teardownLocked()
 		return err
 	}
 
@@ -186,7 +189,6 @@ func (t *Transport) setupControlProtocol(ctx context.Context) error {
 	t.protocol = control.NewProtocol(t.protocolAdapter, t.buildProtocolOptions()...)
 
 	if err := t.protocol.Start(ctx); err != nil {
-		t.cleanup()
 		return fmt.Errorf("failed to start control protocol: %w", err)
 	}
 
@@ -212,7 +214,6 @@ func (t *Transport) setupControlProtocol(ctx context.Context) error {
 	_, err := t.protocol.Initialize(ctx)
 	close(initDone)
 	if err != nil {
-		t.cleanup()
 		return fmt.Errorf("failed to initialize control protocol: %w", err)
 	}
 
@@ -251,7 +252,8 @@ func (t *Transport) SendMessage(ctx context.Context, message shared.StreamMessag
 
 // EndInput closes the stdin write side, signaling end-of-input to the CLI
 // while leaving stdout/stderr open so messages can still be received.
-// Mirrors Python's `transport.end_input()`.
+// Idempotent: subsequent calls return nil. The context is unused because
+// os.File.Close is a fast non-cancellable syscall.
 func (t *Transport) EndInput(_ context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -312,7 +314,14 @@ func (t *Transport) Close() error {
 	}
 
 	t.connected = false
+	return t.teardownLocked()
+}
 
+// teardownLocked closes the control protocol, cancels the context, closes
+// stdin, waits for I/O goroutines, terminates the subprocess, and clears
+// resources. Caller must hold t.mu. Safe to call from any post-Start state -
+// each field is nil-checked. Used by both Close and Connect's error path.
+func (t *Transport) teardownLocked() error {
 	// Close control protocol first (before cancelling context)
 	if t.protocol != nil {
 		_ = t.protocol.Close()
@@ -323,40 +332,32 @@ func (t *Transport) Close() error {
 		t.protocolAdapter = nil
 	}
 
-	// Cancel context to stop goroutines
 	if t.cancel != nil {
 		t.cancel()
 	}
 
-	// Close stdin if open
 	if t.stdin != nil {
 		_ = t.stdin.Close()
 		t.stdin = nil
 	}
 
-	// Wait for goroutines to finish with timeout
+	// Wait for goroutines to finish with timeout.
 	done := make(chan struct{})
 	go func() {
 		t.wg.Wait()
 		close(done)
 	}()
-
 	select {
 	case <-done:
-		// Goroutines finished gracefully
 	case <-time.After(terminationTimeoutSeconds * time.Second):
-		// Timeout: proceed with cleanup anyway
-		// Goroutines should terminate when process is killed
+		// Goroutines should terminate when the process is killed below.
 	}
 
-	// Terminate process with 5-second timeout
 	var err error
 	if t.cmd != nil && t.cmd.Process != nil {
 		err = t.terminateProcess()
 	}
 
-	// Cleanup resources
 	t.cleanup()
-
 	return err
 }

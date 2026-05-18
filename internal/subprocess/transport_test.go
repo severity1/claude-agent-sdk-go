@@ -3,9 +3,11 @@ package subprocess
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -158,6 +160,84 @@ func TestTransportErrorHandling(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTransportConnectFailureTearsDown verifies that when initialize fails
+// against a CLI that stays alive (does not self-exit), Connect tears the
+// subprocess down before returning - the process is reaped and pipes/cmd
+// are released. The init_error mock writes its PID to stderr at startup so
+// the test can probe whether the OS process is gone.
+func TestTransportConnectFailureTearsDown(t *testing.T) {
+	ctx, cancel := setupTransportTestContext(t, 15*time.Second)
+	defer cancel()
+
+	pidCh := make(chan int, 1)
+	options := &shared.Options{
+		StderrCallback: func(line string) {
+			const prefix = "MOCK_PID="
+			if !strings.HasPrefix(line, prefix) {
+				return
+			}
+			var pid int
+			if _, err := fmt.Sscanf(line[len(prefix):], "%d", &pid); err == nil {
+				select {
+				case pidCh <- pid:
+				default:
+				}
+			}
+		},
+	}
+	transport := New(newTransportMockCLIInitError(t), options, "sdk-go")
+	t.Cleanup(func() { _ = transport.Close() })
+
+	err := transport.Connect(ctx)
+	if err == nil {
+		t.Fatal("Connect should have failed against init_error mock CLI")
+		return
+	}
+	if !strings.Contains(err.Error(), "initialize") {
+		t.Errorf("expected initialize-related error, got: %v", err)
+	}
+
+	if transport.IsConnected() {
+		t.Error("transport should be disconnected after Connect failure")
+	}
+	if transport.cmd != nil {
+		t.Error("transport.cmd should be nil after Connect failure teardown")
+	}
+
+	// Close after a torn-down Connect is a no-op.
+	if err := transport.Close(); err != nil {
+		t.Errorf("Close after Connect failure should be a no-op, got: %v", err)
+	}
+
+	// Verify the subprocess itself is gone (no zombie, no orphan). The mock
+	// emitted its PID on stderr; on Unix, Signal(0) returns an error when
+	// the process is no longer running.
+	if runtime.GOOS == windowsOS {
+		return // Signal(0) PID probe is POSIX-only.
+	}
+	var pid int
+	select {
+	case pid = <-pidCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("mock CLI never emitted its PID on stderr - cannot verify reaping")
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		t.Fatalf("os.FindProcess(%d): %v", pid, err)
+	}
+	// Poll briefly because the kernel may take a few ms to mark the process
+	// as exited after Wait returns.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			return // process is gone - reaped successfully.
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Errorf("mock CLI (pid=%d) is still alive after Connect failure - teardown leaked it", pid)
 }
 
 // TestTransportConcurrency tests concurrent operations and backpressure handling

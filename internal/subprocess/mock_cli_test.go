@@ -52,6 +52,7 @@ const (
 	mockModeInvalidOutput       = "invalid_output"
 	mockModeWithControlProtocol = "with_control_protocol"
 	mockModeWithStderr          = "with_stderr"
+	mockModeInitError           = "init_error"
 )
 
 // runMockCLI dispatches to per-mode handlers. Kept thin so gocyclo stays low.
@@ -78,6 +79,8 @@ func runMockCLI(mode string) {
 		runMockWithControlProtocol()
 	case mockModeWithStderr:
 		runMockWithStderr()
+	case mockModeInitError:
+		runMockInitError()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown mock CLI mode: %s\n", mode)
 		os.Exit(2)
@@ -185,6 +188,25 @@ func runMockWithStderr() {
 	controlEchoLoop(os.Stdin, os.Stdout)
 }
 
+// runMockInitError emits its PID on stderr so the test can verify reaping,
+// then responds to the initialize control request with an error subtype and
+// keeps reading stdin so the SDK must explicitly terminate the process.
+// Used to verify that a failed Connect tears the subprocess down.
+func runMockInitError() {
+	fmt.Fprintf(os.Stderr, "MOCK_PID=%d\n", os.Getpid())
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if isControlRequest(line) {
+			fmt.Printf(
+				`{"type":"control_response","response":{"subtype":"error","request_id":%q,"error":"mock init failure"}}`+"\n",
+				extractRequestID(line),
+			)
+		}
+	}
+}
+
 // controlEchoLoop reads JSON-line stdin and replies to every control_request
 // with a success control_response carrying the matching request_id. Returns
 // when stdin closes.
@@ -272,5 +294,14 @@ func newTransportMockCLIWithControlProtocol(t *testing.T) string {
 func newTransportMockCLIWithStderr(t *testing.T) string {
 	t.Helper()
 	t.Setenv(envMockMode, mockModeWithStderr)
+	return os.Args[0]
+}
+
+// newTransportMockCLIInitError returns the test binary configured to reply to
+// initialize with an error subtype while keeping the process alive on stdin.
+// Exercises the Connect-fails cleanup path.
+func newTransportMockCLIInitError(t *testing.T) string {
+	t.Helper()
+	t.Setenv(envMockMode, mockModeInitError)
 	return os.Args[0]
 }
