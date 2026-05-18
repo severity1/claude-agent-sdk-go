@@ -114,6 +114,7 @@ make ci                           # Run full CI pipeline locally
 - **MCP config serialization**: `generateMcpConfigFile()` strips Go `Instance` field from SDK servers and propagates `AlwaysLoad` explicitly (not via struct json tags) when building CLI config
 - **Permission suggestions**: `ToolPermissionContext.Suggestions []PermissionUpdate` carries CLI-provided permission suggestions to `CanUseTool` callbacks; `PermissionUpdate.Type` is one of `addRules`, `replaceRules`, `removeRules`, `setMode`, `addDirectories`, `removeDirectories`
 - **Test mock helpers**: `newClientMockTransport()` / `newQueryMockTransport()` with functional options (`WithQueryAssistantResponse`, `WithQueryMultipleMessages`); `QueryWithTransport()` for transport-injected query tests
+- **TestMain cross-platform mock CLI**: `internal/subprocess/mock_cli_test.go` and `internal/cli/mock_cli_test.go` each define a `TestMain` that checks a package-scoped env var (`CLAUDE_SDK_TEST_MOCK_MODE` / `CLAUDE_SDK_TEST_CLI_MOCK_MODE`) and re-enters the compiled test binary as a mock CLI process before `m.Run()`. This is the Go analog of Python's `sys.executable -c "..."` and matches the `os/exec` stdlib `TestHelperProcess` idiom. Replaces per-platform `.bat`/`.sh` fixtures. Test helpers (e.g. `newTransportMockCLI(t)`) set the env var via `t.Setenv` (auto-cleaned). `t.Setenv` is incompatible with `t.Parallel()` at the same scope - keep test functions using these helpers sequential. Race-mode parent contexts need ~30s budget because spawning the Go test binary is slower than bash.
 - **Constructor functions**: `NewGetMcpStatusRequest()` follows `NewPermissionResultAllow/Deny` pattern - constructor sets required `Subtype` field (`SubtypeGetMcpStatus = "mcp_status"`, not `"get_mcp_status"`); use constructors for control request types with fixed subtype values
 - **McpServerConfigType constants**: `McpServerConfigTypeStdio/SSE/HTTP/SDK/ClaudeAI` re-exported in root `types.go` alongside `McpServerConnectionStatus` constants; discriminate `McpServerStatusConfig.Type` field
 - **McpServerStatus conditional fields**: `ServerInfo` non-nil only when `Status == McpServerConnectionStatusConnected`; `Error` non-nil only when `Status == McpServerConnectionStatusFailed`; `Tools` populated only when connected
@@ -155,6 +156,7 @@ make ci                           # Run full CI pipeline locally
 - **Self-contained tests**: Each test file has its own helpers to avoid dependencies
 - **Benchmark organization**: Use table-driven benchmarks with realistic scenarios, measure allocations with `b.ReportAllocs()`
 - **t.Fatal() + return**: Always follow `t.Fatal()` with `return` in subtests to prevent staticcheck SA5011 nil pointer dereference warnings (staticcheck does not track that t.Fatal() stops execution)
+- **Cross-platform mock CLI via TestMain**: use `TestMain` + `os.Args[0]` re-entrancy (not `.bat`/`.sh` fixtures) for packages that need a mock subprocess; dispatch on a package-scoped env var set with `t.Setenv`; never use Windows-only skips to work around fixture limitations - the TestMain pattern works identically on all platforms
 
 <!-- END AUTO-MANAGED -->
 

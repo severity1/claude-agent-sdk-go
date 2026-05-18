@@ -3,8 +3,6 @@ package subprocess
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -16,8 +14,7 @@ import (
 
 // Test constants to avoid goconst linter warnings.
 const (
-	testBatExtension = ".bat"
-	testModelName    = "claude-sonnet-4-5"
+	testModelName = "claude-sonnet-4-5"
 )
 
 // TestTransportLifecycle tests connection lifecycle, state management, and reconnection
@@ -26,7 +23,7 @@ func TestTransportLifecycle(t *testing.T) {
 	defer cancel()
 
 	// Test basic lifecycle
-	transport := setupTransportForTest(t, newTransportMockCLI())
+	transport := setupTransportForTest(t, newTransportMockCLI(t))
 	defer disconnectTransportSafely(t, transport)
 
 	// Initial state should be disconnected
@@ -54,7 +51,7 @@ func TestTransportMessageIO(t *testing.T) {
 	ctx, cancel := setupTransportTestContext(t, 10*time.Second)
 	defer cancel()
 
-	transport := setupTransportForTest(t, newTransportMockCLI())
+	transport := setupTransportForTest(t, newTransportMockCLI(t))
 	defer disconnectTransportSafely(t, transport)
 
 	connectTransportSafely(ctx, t, transport)
@@ -100,7 +97,7 @@ func TestTransportErrorHandling(t *testing.T) {
 		{
 			name: "connection_with_failing_cli",
 			setupTransport: func() *Transport {
-				return setupTransportForTest(t, newTransportMockCLIWithOptions(WithFailure()))
+				return setupTransportForTest(t, newTransportMockCLIWithOptions(t, WithFailure()))
 			},
 			operation: func(tr *Transport) error {
 				return tr.Connect(ctx)
@@ -113,7 +110,7 @@ func TestTransportErrorHandling(t *testing.T) {
 		{
 			name: "send_to_disconnected_transport",
 			setupTransport: func() *Transport {
-				return setupTransportForTest(t, newTransportMockCLI())
+				return setupTransportForTest(t, newTransportMockCLI(t))
 			},
 			operation: func(tr *Transport) error {
 				// Don't connect - send to disconnected transport
@@ -126,7 +123,7 @@ func TestTransportErrorHandling(t *testing.T) {
 		{
 			name: "context_cancellation",
 			setupTransport: func() *Transport {
-				return setupTransportForTest(t, newTransportMockCLI())
+				return setupTransportForTest(t, newTransportMockCLI(t))
 			},
 			operation: func(tr *Transport) error {
 				connectTransportSafely(ctx, t, tr)
@@ -168,7 +165,7 @@ func TestTransportConcurrency(t *testing.T) {
 	ctx, cancel := setupTransportTestContext(t, 15*time.Second)
 	defer cancel()
 
-	transport := setupTransportForTest(t, newTransportMockCLI())
+	transport := setupTransportForTest(t, newTransportMockCLI(t))
 	defer disconnectTransportSafely(t, transport)
 
 	connectTransportSafely(ctx, t, transport)
@@ -237,7 +234,7 @@ func TestTransportReceiveMessagesNotConnected(t *testing.T) {
 	ctx, cancel := setupTransportTestContext(t, 5*time.Second)
 	defer cancel()
 
-	transport := setupTransportForTest(t, newTransportMockCLI())
+	transport := setupTransportForTest(t, newTransportMockCLI(t))
 
 	// Test ReceiveMessages on disconnected transport
 	msgChan, errChan := transport.ReceiveMessages(ctx)
@@ -322,169 +319,6 @@ func WithInvalidOutput() TransportMockOption {
 	}
 }
 
-func newTransportMockCLI() string {
-	return newTransportMockCLIWithOptions()
-}
-
-func newTransportMockCLIWithOptions(options ...TransportMockOption) string {
-	opts := &transportMockOptions{}
-	for _, opt := range options {
-		opt(opts)
-	}
-
-	var script string
-	var extension string
-
-	if runtime.GOOS == windowsOS {
-		extension = testBatExtension
-		switch {
-		case opts.shouldFail:
-			script = `@echo off
-if "%1"=="-v" (echo 3.0.0 & exit /b 0)
-echo Mock CLI failing >&2
-exit /b 1
-`
-		case opts.longRunning:
-			script = `@echo off
-if "%1"=="-v" (echo 3.0.0 & exit /b 0)
-echo {"type":"assistant","content":[{"type":"text","text":"Long running mock"}],"model":"claude-3"}
-timeout /t 30 /nobreak > NUL
-`
-		case opts.checkEnvironment:
-			script = `@echo off
-if "%1"=="-v" (echo 3.0.0 & exit /b 0)
-if "%CLAUDE_CODE_ENTRYPOINT%"=="sdk-go" (
-    echo {"type":"assistant","content":[{"type":"text","text":"Environment OK"}],"model":"claude-3"}
-) else (
-    echo Missing environment variable >&2
-    exit /b 1
-)
-timeout /t 1 /nobreak > NUL
-`
-		case opts.invalidOutput:
-			script = `@echo off
-if "%1"=="-v" (echo 3.0.0 & exit /b 0)
-echo This is not valid JSON output
-echo {"invalid": json}
-echo {"type":"assistant","content":[{"type":"text","text":"Valid after invalid"}],"model":"claude-3"}
-timeout /t 1 /nobreak > NUL
-`
-		default:
-			script = `@echo off
-if "%1"=="-v" (echo 3.0.0 & exit /b 0)
-setlocal enabledelayedexpansion
-echo {"type":"assistant","content":[{"type":"text","text":"Mock response"}],"model":"claude-3"}
-:loop
-set /p line=
-if "!line!"=="" goto end
-echo !line! | findstr /C:"control_request" > nul
-if %errorlevel%==0 (
-    for /f "tokens=2 delims=:" %%a in ('echo !line! ^| findstr /o /c:"request_id"') do echo {"type":"control_response","response":{"subtype":"success","request_id":"req_1_mock","response":{}}}
-)
-goto loop
-:end
-`
-		}
-	} else {
-		extension = ""
-		switch {
-		case opts.shouldFail:
-			script = `#!/bin/bash
-# Handle -v flag for version check
-if [ "$1" = "-v" ]; then echo "3.0.0"; exit 0; fi
-echo "Mock CLI failing" >&2
-exit 1
-`
-		case opts.longRunning:
-			script = `#!/bin/bash
-# Handle -v flag for version check
-if [ "$1" = "-v" ]; then echo "3.0.0"; exit 0; fi
-# Ignore SIGTERM initially to test 5-second timeout
-trap 'echo "Received SIGTERM, ignoring for 6 seconds"; sleep 6; exit 1' TERM
-echo '{"type":"assistant","content":[{"type":"text","text":"Long running mock"}],"model":"claude-3"}'
-# Read stdin and respond to control requests, keeping the process alive long
-# enough for termination tests. Reading is the natural keep-alive: blocks until
-# stdin closes (Transport.Close) and lets the trap fire on SIGTERM.
-while IFS= read -r line; do
-    if [[ "$line" == *"control_request"* ]]; then
-        req_id=$(echo "$line" | grep -o '"request_id":"[^"]*"' | cut -d'"' -f4)
-        [ -z "$req_id" ] && req_id="req_1_mock"
-        echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$req_id\",\"response\":{}}}"
-    fi
-done
-`
-		case opts.checkEnvironment:
-			script = `#!/bin/bash
-# Handle -v flag for version check
-if [ "$1" = "-v" ]; then echo "3.0.0"; exit 0; fi
-if [ "$CLAUDE_CODE_ENTRYPOINT" != "sdk-go" ] && [ "$CLAUDE_CODE_ENTRYPOINT" != "sdk-go-client" ]; then
-    echo "Missing environment variable" >&2
-    exit 1
-fi
-echo '{"type":"assistant","content":[{"type":"text","text":"Environment OK"}],"model":"claude-3"}'
-while IFS= read -r line; do
-    if [[ "$line" == *"control_request"* ]]; then
-        req_id=$(echo "$line" | grep -o '"request_id":"[^"]*"' | cut -d'"' -f4)
-        [ -z "$req_id" ] && req_id="req_1_mock"
-        echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$req_id\",\"response\":{}}}"
-    fi
-done
-`
-		case opts.invalidOutput:
-			script = `#!/bin/bash
-# Handle -v flag for version check
-if [ "$1" = "-v" ]; then echo "3.0.0"; exit 0; fi
-# Respond to control requests FIRST so initialize completes before invalid
-# lines can corrupt the parser's speculative-parse buffer.
-read -r line
-if [[ "$line" == *"control_request"* ]]; then
-    req_id=$(echo "$line" | grep -o '"request_id":"[^"]*"' | cut -d'"' -f4)
-    [ -z "$req_id" ] && req_id="req_1_mock"
-    echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$req_id\",\"response\":{}}}"
-fi
-echo "This is not valid JSON output"
-echo '{"invalid": json}'
-echo '{"type":"assistant","content":[{"type":"text","text":"Valid after invalid"}],"model":"claude-3"}'
-while IFS= read -r line; do
-    if [[ "$line" == *"control_request"* ]]; then
-        req_id=$(echo "$line" | grep -o '"request_id":"[^"]*"' | cut -d'"' -f4)
-        [ -z "$req_id" ] && req_id="req_1_mock"
-        echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$req_id\",\"response\":{}}}"
-    fi
-done
-`
-		default:
-			script = `#!/bin/bash
-# Handle -v flag for version check
-if [ "$1" = "-v" ]; then echo "3.0.0"; exit 0; fi
-echo '{"type":"assistant","content":[{"type":"text","text":"Mock response"}],"model":"claude-3"}'
-# Respond to control requests on stdin so unconditional initialize succeeds
-while IFS= read -r line; do
-    if [[ "$line" == *"control_request"* ]]; then
-        req_id=$(echo "$line" | grep -o '"request_id":"[^"]*"' | cut -d'"' -f4)
-        [ -z "$req_id" ] && req_id="req_1_mock"
-        echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$req_id\",\"response\":{}}}"
-    fi
-done
-`
-		}
-	}
-
-	return createTransportTempScript(script, extension)
-}
-
-func createTransportTempScript(script, extension string) string {
-	tempDir := os.TempDir()
-	scriptPath := filepath.Join(tempDir, fmt.Sprintf("mock-claude-%d%s", time.Now().UnixNano(), extension))
-
-	err := os.WriteFile(scriptPath, []byte(script), 0o755) // #nosec G306 - Test script needs to be executable
-	if err != nil {
-		panic(fmt.Sprintf("Failed to create mock CLI script: %v", err))
-	}
-
-	return scriptPath
-}
-
 func setupTransportTestContext(t *testing.T, timeout time.Duration) (context.Context, context.CancelFunc) {
 	t.Helper()
 	return context.WithTimeout(context.Background(), timeout)
@@ -562,7 +396,7 @@ func TestConnectAlwaysUsesStreamingMode(t *testing.T) {
 	ctx, cancel := setupTransportTestContext(t, 5*time.Second)
 	defer cancel()
 
-	transport := setupTransportForTest(t, newTransportMockCLIWithControlProtocol())
+	transport := setupTransportForTest(t, newTransportMockCLIWithControlProtocol(t))
 	defer disconnectTransportSafely(t, transport)
 
 	if err := transport.Connect(ctx); err != nil {
@@ -584,7 +418,7 @@ func TestEndInputClosesStdinWriteOnly(t *testing.T) {
 	ctx, cancel := setupTransportTestContext(t, 5*time.Second)
 	defer cancel()
 
-	transport := setupTransportForTest(t, newTransportMockCLIWithControlProtocol())
+	transport := setupTransportForTest(t, newTransportMockCLIWithControlProtocol(t))
 	defer disconnectTransportSafely(t, transport)
 
 	if err := transport.Connect(ctx); err != nil {
@@ -622,7 +456,7 @@ func TestTransportConnectErrorPaths(t *testing.T) {
 		{
 			name: "already_connected_error",
 			setup: func() *Transport {
-				transport := setupTransportForTest(t, newTransportMockCLI())
+				transport := setupTransportForTest(t, newTransportMockCLI(t))
 				connectTransportSafely(ctx, t, transport)
 				return transport
 			},
@@ -632,7 +466,7 @@ func TestTransportConnectErrorPaths(t *testing.T) {
 			name: "invalid_working_directory",
 			setup: func() *Transport {
 				options := &shared.Options{Cwd: stringPtr("/nonexistent/directory/path")}
-				return New(newTransportMockCLI(), options, "sdk-go")
+				return New(newTransportMockCLI(t), options, "sdk-go")
 			},
 			wantError: true,
 		},
@@ -662,12 +496,14 @@ func TestTransportConnectErrorPaths(t *testing.T) {
 
 // TestTransportSendMessageEdgeCases tests uncovered SendMessage scenarios
 func TestTransportSendMessageEdgeCases(t *testing.T) {
-	ctx, cancel := setupTransportTestContext(t, 5*time.Second)
+	// Generous timeout: each subtest spawns the test binary as the mock CLI,
+	// which is slower than the legacy bash/.bat fixtures under -race.
+	ctx, cancel := setupTransportTestContext(t, 30*time.Second)
 	defer cancel()
 
 	// Test SendMessage writes to stdin always (no more one-shot no-op)
 	t.Run("send_message_writes_to_stdin_always", func(t *testing.T) {
-		transport := setupTransportForTest(t, newTransportMockCLI())
+		transport := setupTransportForTest(t, newTransportMockCLI(t))
 		defer disconnectTransportSafely(t, transport)
 
 		connectTransportSafely(ctx, t, transport)
@@ -679,7 +515,7 @@ func TestTransportSendMessageEdgeCases(t *testing.T) {
 
 	// Test SendMessage with invalid JSON
 	t.Run("send_message_marshal_error", func(t *testing.T) {
-		transport := setupTransportForTest(t, newTransportMockCLI())
+		transport := setupTransportForTest(t, newTransportMockCLI(t))
 		defer disconnectTransportSafely(t, transport)
 
 		connectTransportSafely(ctx, t, transport)
@@ -693,7 +529,7 @@ func TestTransportSendMessageEdgeCases(t *testing.T) {
 
 	// Test context cancellation during send
 	t.Run("context_cancelled_during_send", func(t *testing.T) {
-		transport := setupTransportForTest(t, newTransportMockCLI())
+		transport := setupTransportForTest(t, newTransportMockCLI(t))
 		defer disconnectTransportSafely(t, transport)
 
 		connectTransportSafely(ctx, t, transport)
@@ -717,7 +553,7 @@ func TestTransportInterruptErrorPaths(t *testing.T) {
 
 	// Test interrupt on disconnected transport
 	t.Run("interrupt_disconnected_transport", func(t *testing.T) {
-		transport := setupTransportForTest(t, newTransportMockCLI())
+		transport := setupTransportForTest(t, newTransportMockCLI(t))
 
 		// Don't connect - test interrupt on disconnected transport
 		err := transport.Interrupt(ctx)
@@ -728,7 +564,7 @@ func TestTransportInterruptErrorPaths(t *testing.T) {
 
 	// Test interrupt with nil process
 	t.Run("interrupt_nil_process", func(t *testing.T) {
-		transport := setupTransportForTest(t, newTransportMockCLI())
+		transport := setupTransportForTest(t, newTransportMockCLI(t))
 		defer disconnectTransportSafely(t, transport)
 
 		connectTransportSafely(ctx, t, transport)
@@ -743,7 +579,7 @@ func TestTransportInterruptErrorPaths(t *testing.T) {
 
 	if runtime.GOOS != windowsOS {
 		t.Run("interrupt_signal_error", func(t *testing.T) {
-			transport := setupTransportForTest(t, newTransportMockCLI())
+			transport := setupTransportForTest(t, newTransportMockCLI(t))
 			defer disconnectTransportSafely(t, transport)
 
 			connectTransportSafely(ctx, t, transport)
@@ -762,17 +598,16 @@ func TestTransportControlProtocolIntegration(t *testing.T) {
 	defer cancel()
 
 	tests := []struct {
-		name        string
-		setup       func() *Transport
-		operation   func(ctx context.Context, t *Transport) error
-		wantErr     bool
-		errSubstr   string
-		skipWindows bool // Skip on Windows due to batch script limitations
+		name      string
+		setup     func() *Transport
+		operation func(ctx context.Context, t *Transport) error
+		wantErr   bool
+		errSubstr string
 	}{
 		{
 			name: "SetModel_requires_connection",
 			setup: func() *Transport {
-				return setupTransportForTest(t, newTransportMockCLI())
+				return setupTransportForTest(t, newTransportMockCLI(t))
 			},
 			operation: func(ctx context.Context, t *Transport) error {
 				// Don't connect first
@@ -785,7 +620,7 @@ func TestTransportControlProtocolIntegration(t *testing.T) {
 		{
 			name: "SetPermissionMode_requires_connection",
 			setup: func() *Transport {
-				return setupTransportForTest(t, newTransportMockCLI())
+				return setupTransportForTest(t, newTransportMockCLI(t))
 			},
 			operation: func(ctx context.Context, t *Transport) error {
 				// Don't connect first
@@ -798,49 +633,42 @@ func TestTransportControlProtocolIntegration(t *testing.T) {
 			name: "SetModel_in_streaming_mode_with_protocol",
 			setup: func() *Transport {
 				// Streaming mode with control protocol mock CLI
-				return setupTransportForTest(t, newTransportMockCLIWithControlProtocol())
+				return setupTransportForTest(t, newTransportMockCLIWithControlProtocol(t))
 			},
 			operation: func(ctx context.Context, t *Transport) error {
 				model := testModelName
 				return t.SetModel(ctx, &model)
 			},
-			wantErr:     false, // Should succeed when protocol is wired
-			errSubstr:   "",
-			skipWindows: true, // Batch script can't properly parse/respond to control requests
+			wantErr:   false, // Should succeed when protocol is wired
+			errSubstr: "",
 		},
 		{
 			name: "SetPermissionMode_in_streaming_mode_with_protocol",
 			setup: func() *Transport {
 				// Streaming mode with control protocol mock CLI
-				return setupTransportForTest(t, newTransportMockCLIWithControlProtocol())
+				return setupTransportForTest(t, newTransportMockCLIWithControlProtocol(t))
 			},
 			operation: func(ctx context.Context, t *Transport) error {
 				return t.SetPermissionMode(ctx, "accept_edits")
 			},
-			wantErr:     false, // Should succeed when protocol is wired
-			errSubstr:   "",
-			skipWindows: true, // Batch script can't properly parse/respond to control requests
+			wantErr:   false, // Should succeed when protocol is wired
+			errSubstr: "",
 		},
 		{
 			name: "SetModel_nil_resets_to_default",
 			setup: func() *Transport {
-				return setupTransportForTest(t, newTransportMockCLIWithControlProtocol())
+				return setupTransportForTest(t, newTransportMockCLIWithControlProtocol(t))
 			},
 			operation: func(ctx context.Context, t *Transport) error {
 				return t.SetModel(ctx, nil) // nil means reset to default
 			},
-			wantErr:     false,
-			errSubstr:   "",
-			skipWindows: true, // Batch script can't properly parse/respond to control requests
+			wantErr:   false,
+			errSubstr: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.skipWindows && runtime.GOOS == windowsOS {
-				t.Skip("Skipped on Windows: batch script cannot properly handle control protocol")
-			}
-
 			transport := tt.setup()
 			defer disconnectTransportSafely(t, transport)
 
@@ -869,15 +697,11 @@ func TestTransportControlProtocolIntegration(t *testing.T) {
 // TestTransportControlMessageRouting tests that control messages are properly
 // routed to the protocol and regular messages go to msgChan.
 func TestTransportControlMessageRouting(t *testing.T) {
-	if runtime.GOOS == windowsOS {
-		t.Skip("Skipped on Windows: batch script cannot properly handle control protocol")
-	}
-
 	ctx, cancel := setupTransportTestContext(t, 10*time.Second)
 	defer cancel()
 
 	// Create transport with control protocol mock CLI
-	transport := setupTransportForTest(t, newTransportMockCLIWithControlProtocol())
+	transport := setupTransportForTest(t, newTransportMockCLIWithControlProtocol(t))
 	defer disconnectTransportSafely(t, transport)
 
 	connectTransportSafely(ctx, t, transport)
@@ -906,65 +730,4 @@ func TestTransportControlMessageRouting(t *testing.T) {
 			return
 		}
 	}
-}
-
-// newTransportMockCLIWithControlProtocol creates a mock CLI that supports control protocol.
-// It responds to control requests with proper control responses.
-func newTransportMockCLIWithControlProtocol() string {
-	var script string
-	var extension string
-
-	if runtime.GOOS == windowsOS {
-		extension = testBatExtension
-		// Windows batch script that echoes back control responses
-		script = `@echo off
-if "%1"=="-v" (echo 3.0.0 & exit /b 0)
-setlocal enabledelayedexpansion
-
-:loop
-set /p line=
-if "!line!"=="" goto end
-
-REM Check if it's a control request and echo a response
-echo !line! | findstr /C:"control_request" > nul
-if %errorlevel%==0 (
-    REM Extract request_id and send success response
-    echo {"type":"control_response","response":{"subtype":"success","request_id":"req_1_mock","response":{}}}
-)
-
-REM Also output regular messages for testing
-echo {"type":"assistant","content":[{"type":"text","text":"Mock response"}],"model":"claude-3"}
-goto loop
-
-:end
-`
-	} else {
-		extension = ""
-		// Bash script that reads control requests and echoes responses
-		script = `#!/bin/bash
-# Handle -v flag for version check
-if [ "$1" = "-v" ]; then echo "3.0.0"; exit 0; fi
-
-# Output a regular message first
-echo '{"type":"assistant","content":[{"type":"text","text":"Mock response"}],"model":"claude-3"}'
-
-# Read stdin and respond to control requests
-while IFS= read -r line; do
-    if [[ "$line" == *"control_request"* ]]; then
-        # Extract request_id using grep/sed
-        req_id=$(echo "$line" | grep -o '"request_id":"[^"]*"' | cut -d'"' -f4)
-        if [ -z "$req_id" ]; then
-            req_id="req_1_mock"
-        fi
-        # Echo success response
-        echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$req_id\",\"response\":{}}}"
-    fi
-done
-
-# Keep process alive briefly
-sleep 1
-`
-	}
-
-	return createTransportTempScript(script, extension)
 }

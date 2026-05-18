@@ -21,6 +21,7 @@ subprocess/
 ├── process_test.go       # Process termination tests
 ├── config_test.go        # Environment and MCP config tests
 ├── agents_test.go        # agentsToMap stripping and protocol options wiring tests
+├── mock_cli_test.go      # TestMain + os.Args[0] mock CLI (cross-platform, CLAUDE_SDK_TEST_MOCK_MODE)
 ├── protocol_adapter.go   # ProtocolAdapter for control.Transport interface
 └── protocol_adapter_test.go # Adapter tests
 ```
@@ -62,5 +63,15 @@ subprocess/
 
 <!-- MANUAL -->
 ## Notes
+
+### Cross-platform mock CLI (TestMain + os.Args[0] re-entrancy)
+
+Subprocess tests use the compiled test binary itself as the mock Claude CLI, dispatched on env vars. This is the Go analog of Python's `sys.executable -c "..."` pattern and matches the os/exec stdlib `TestHelperProcess` idiom. It replaces the per-platform `.bat` / shell-script fixtures that previously could not reliably participate in the control protocol on Windows.
+
+- **Entry point**: `mock_cli_test.go` defines `TestMain`. When `CLAUDE_SDK_TEST_MOCK_MODE` is set, the binary runs the mock handler and `os.Exit`s before `m.Run()` is reached. Otherwise normal tests run.
+- **Mode protocol**: `CLAUDE_SDK_TEST_MOCK_MODE` selects a handler: `default`, `long_running`, `should_fail`, `check_environment`, `invalid_output`, `with_control_protocol`, `with_stderr`. Modes that handle the streaming flow respond to `-v` first (so `cli.CheckCLIVersion` works), then participate in the unconditional initialize handshake by echoing a `control_response` for every `control_request` line on stdin.
+- **Helper API**: `newTransportMockCLI(t)`, `newTransportMockCLIWithOptions(t, opts...)`, `newTransportMockCLIWithControlProtocol(t)`, `newTransportMockCLIWithStderr(t)`. Each calls `t.Setenv` to scope the mode to the test (auto-cleaned at test end) and returns `os.Args[0]`.
+- **Parallel-subtest constraint**: `t.Setenv` is incompatible with `t.Parallel()` at the same scope. Sibling subtests under one parent using different modes must run sequentially. None of the existing tests call `t.Parallel()` here; keep it that way.
+- **Race-mode timeouts**: spawning the Go test binary is slower than spawning a bash script (especially under `-race`). Parent-test contexts that fan out to multiple connecting subtests need a generous deadline (~30s for 3-6 subtests) so the budget isn't consumed by startup.
 
 <!-- END MANUAL -->
