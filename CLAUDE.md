@@ -99,7 +99,7 @@ make ci                           # Run full CI pipeline locally
 ## Detected Patterns
 
 - **Transport interface**: Central abstraction for CLI communication; use `MockTransport` for tests
-- **Process cleanup**: SIGTERM -> wait 5 seconds -> SIGKILL pattern
+- **Process cleanup**: SIGTERM -> wait 5 seconds -> SIGKILL; `terminateProcess()` checks `stdoutDone` first and returns early (nil) if the CLI already exited, avoiding a redundant Signal/Kill; `isProcessAlreadyFinishedError()` suppresses expected termination errors including Windows `"TerminateProcess: Access is denied"` (returned when TerminateProcess targets an already-exited process)
 - **Buffer protection**: 1MB limit to prevent memory exhaustion; `parser.NewWithSize(n)` allows configurable override
 - **Environment variables**: Set `CLAUDE_CODE_ENTRYPOINT` to identify SDK to CLI
 - **Table-driven tests**: Use for complex scenarios with multiple test cases

@@ -39,7 +39,7 @@ subprocess/
 <!-- AUTO-MANAGED: conventions -->
 ## Module-Specific Conventions
 
-- Graceful shutdown: SIGTERM with 5s grace period before SIGKILL
+- Graceful shutdown: SIGTERM with 5s grace period before SIGKILL; `terminateProcess()` checks `stdoutDone` before signaling - if closed (CLI already exited), returns nil immediately to avoid a race on Windows where `TerminateProcess` on a self-exited process returns `"Access is denied"`; `isProcessAlreadyFinishedError()` treats that string as a non-error alongside the POSIX equivalents
 - Message routing: Distinguish control vs regular messages by type
 - Protocol adapter: Bridges subprocess stdin to `control.Transport` interface
 - Resource cleanup: Always close stdin before waiting for process exit
