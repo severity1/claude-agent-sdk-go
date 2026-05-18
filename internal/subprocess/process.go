@@ -17,13 +17,24 @@ func isProcessAlreadyFinishedError(err error) bool {
 	return strings.Contains(errStr, "process already finished") ||
 		strings.Contains(errStr, "process already released") ||
 		strings.Contains(errStr, "no child processes") ||
-		strings.Contains(errStr, "signal: killed")
+		strings.Contains(errStr, "signal: killed") ||
+		// Windows returns this when TerminateProcess targets an already-exited process.
+		strings.Contains(errStr, "TerminateProcess: Access is denied")
 }
 
 // terminateProcess implements the 5-second SIGTERM -> SIGKILL sequence
 func (t *Transport) terminateProcess() error {
 	if t.cmd == nil || t.cmd.Process == nil {
 		return nil
+	}
+
+	// stdout closed means the CLI already exited; skip Signal/Kill.
+	if t.stdoutDone != nil {
+		select {
+		case <-t.stdoutDone:
+			return nil
+		default:
+		}
 	}
 
 	// Send SIGTERM
