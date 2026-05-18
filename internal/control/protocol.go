@@ -61,7 +61,7 @@ type Protocol struct {
 	// SDK MCP servers for in-process tool handling
 	sdkMcpServers map[string]McpServer
 
-	// Agents to send via initialize request (Python SDK PR #468 parity).
+	// agents travel in the initialize control request, bypassing argv size limits.
 	agents map[string]any
 
 	// Background goroutine management
@@ -112,9 +112,9 @@ func WithSdkMcpServers(servers map[string]McpServer) ProtocolOption {
 	}
 }
 
-// WithAgents configures agent definitions to be sent in the initialize request.
-// Agents travel via the control protocol over stdin, bypassing platform ARG_MAX
-// limits that previously broke large agent payloads when passed via --agents.
+// WithAgents configures agent definitions to be sent in the initialize
+// request. Agents travel via the control protocol over stdin so the
+// payload size is bounded by stdin buffering rather than argv limits.
 func WithAgents(agents map[string]any) ProtocolOption {
 	return func(p *Protocol) {
 		p.agents = agents
@@ -413,14 +413,11 @@ func (p *Protocol) sendErrorResponse(ctx context.Context, requestID string, errM
 // calls return the same error and will not retry even with a fresh context.
 func (p *Protocol) Initialize(ctx context.Context) (*InitializeResponse, error) {
 	p.initOnce.Do(func() {
-		// Build initialize request with hooks configuration
+		// Hooks is always assigned (nil when none registered) so the
+		// wire body always carries the `"hooks"` key.
 		initReq := InitializeRequest{
 			Subtype: SubtypeInitialize,
-		}
-
-		// Generate hook registrations and build hooks config
-		if p.hooks != nil {
-			initReq.Hooks = p.buildHooksConfig()
+			Hooks:   p.buildHooksConfig(),
 		}
 
 		if len(p.agents) > 0 {

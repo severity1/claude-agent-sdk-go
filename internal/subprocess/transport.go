@@ -168,8 +168,8 @@ func (t *Transport) Connect(ctx context.Context) error {
 	}
 
 	// Set up control protocol and run the initialize handshake. Initialize
-	// is unconditional now (Python SDK PR #468) so the agents field on the
-	// initialize request can travel to the CLI for every connection.
+	// is unconditional so the agents map can travel on the initialize
+	// request rather than via argv.
 	if err := t.setupControlProtocol(t.ctx); err != nil {
 		return err
 	}
@@ -179,9 +179,8 @@ func (t *Transport) Connect(ctx context.Context) error {
 }
 
 // setupControlProtocol starts the control protocol and runs the initialize
-// handshake. The handshake always runs so that the agents map - which now
-// rides on the initialize request rather than the --agents CLI flag - is
-// always delivered.
+// handshake. The handshake is unconditional so the agents map always
+// reaches the CLI on every connection.
 func (t *Transport) setupControlProtocol(ctx context.Context) error {
 	t.protocolAdapter = NewProtocolAdapter(t.stdin)
 	t.protocol = control.NewProtocol(t.protocolAdapter, t.buildProtocolOptions()...)
@@ -195,6 +194,10 @@ func (t *Transport) setupControlProtocol(ctx context.Context) error {
 	// initialize unblocks the handshake instead of waiting for timeout.
 	// Capture channel/protocol locally so the goroutine doesn't race with a
 	// subsequent Connect() reassigning t.stdoutDone or t.protocol.
+	//
+	// initDone closes AFTER Initialize returns (below), so the watcher
+	// exits cleanly on the success path. Any late stdoutDone fires from
+	// after that are absorbed by HandleControlInitErr's post-init guard.
 	initDone := make(chan struct{})
 	stdoutDone := t.stdoutDone
 	protocol := t.protocol

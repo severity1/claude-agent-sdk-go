@@ -13,9 +13,9 @@ import (
 // ErrNoMoreMessages indicates the message iterator has no more messages.
 var ErrNoMoreMessages = errors.New("no more messages")
 
-// Query executes a one-shot query with automatic cleanup.
-// The prompt is written to stdin as a user-message JSON line after the
-// initialize handshake, matching the TypeScript SDK behavior.
+// Query executes a one-shot query with automatic cleanup. The prompt is
+// written to stdin as a user-message JSON line after the initialize
+// handshake.
 func Query(ctx context.Context, prompt string, opts ...Option) (MessageIterator, error) {
 	options := NewOptions(opts...)
 
@@ -164,9 +164,9 @@ func (qi *queryIterator) start() error {
 	qi.msgChan = msgChan
 	qi.errChan = errChan
 
-	// Write the prompt as a user-message JSON line on stdin, matching the
-	// wire shape of Python's `{"type":"user","session_id":"",
-	// "message":{"role":"user","content":...},"parent_tool_use_id":null}`.
+	// Write the prompt as a user-message JSON line on stdin. The wire
+	// body always carries `session_id` and `parent_tool_use_id` keys
+	// (no omitempty on StreamMessage); see internal/shared/stream.go.
 	streamMsg := StreamMessage{
 		Type: "user",
 		Message: map[string]any{
@@ -195,11 +195,8 @@ func (qi *queryIterator) start() error {
 	return nil
 }
 
-// needsBidirectionalStdin reports whether the query needs the CLI to keep
-// reading from stdin after the prompt is written. Hooks, permission
-// callbacks, SDK-MCP servers, and file checkpointing all rely on the
-// control protocol over stdin while the query runs, so stdin must stay
-// open until the first ResultMessage is observed.
+// needsBidirectionalStdin reports whether stdin must stay open for control
+// protocol traffic (hooks, permission callbacks, SDK-MCP, file checkpointing).
 func needsBidirectionalStdin(options *Options) bool {
 	if options == nil {
 		return false

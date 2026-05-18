@@ -35,7 +35,8 @@ const (
 	cliMockModeFind    = "find"
 )
 
-// runCLIMockCLI dispatches to per-mode handlers. Kept thin to satisfy gocyclo.
+// runCLIMockCLI dispatches to per-mode handlers based on the
+// CLAUDE_SDK_TEST_CLI_MOCK_MODE env var.
 func runCLIMockCLI(mode string) {
 	switch mode {
 	case cliMockModeVersion:

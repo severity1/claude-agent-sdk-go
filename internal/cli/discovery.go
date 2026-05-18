@@ -105,9 +105,8 @@ func getCommonCLILocations() []string {
 }
 
 // BuildCommand constructs the CLI command with all necessary flags.
-// Always uses streaming mode (--input-format stream-json) matching the
-// TypeScript SDK and Python SDK PR #468. Prompts are written to stdin
-// after the initialize handshake instead of via --print.
+// Always uses streaming mode (--input-format stream-json); prompts are
+// written to stdin after the initialize handshake instead of via --print.
 func BuildCommand(cliPath string, options *shared.Options) []string {
 	cmd := []string{cliPath}
 

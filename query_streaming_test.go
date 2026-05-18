@@ -9,8 +9,7 @@ import (
 
 // TestQuerySendsPromptAsUserMessage pins the prompt-line wire shape: a
 // user-message JSON object that always carries `session_id` and
-// `parent_tool_use_id` keys (matching the TypeScript SDK), with role and
-// content nested under `message`.
+// `parent_tool_use_id` keys, with role and content nested under `message`.
 func TestQuerySendsPromptAsUserMessage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -55,8 +54,8 @@ func TestQuerySendsPromptAsUserMessage(t *testing.T) {
 	}
 
 	// Wire-bytes assertion: the JSON line the CLI would receive must carry
-	// both `session_id` (empty string) and `parent_tool_use_id` (null) keys,
-	// matching the TypeScript and Python SDKs.
+	// both `session_id` (empty string) and `parent_tool_use_id` (null)
+	// keys regardless of whether they were explicitly set.
 	raw, err := json.Marshal(sent)
 	if err != nil {
 		t.Fatalf("json.Marshal(sent): %v", err)

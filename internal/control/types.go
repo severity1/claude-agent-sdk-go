@@ -85,16 +85,21 @@ type InterruptRequest struct {
 
 // InitializeRequest performs the control protocol handshake.
 // This must be sent before any other control requests in streaming mode.
+//
+// Hooks intentionally lacks omitempty: the wire body always carries the
+// `"hooks"` key, set to `null` when no hooks are registered. Agents uses
+// omitempty so the key is absent when no agents are configured.
 type InitializeRequest struct {
 	// Subtype is always SubtypeInitialize.
 	Subtype string `json:"subtype"`
 	// Hooks contains hook registrations keyed by event type.
 	// Format: {"PreToolUse": [...], "PostToolUse": [...]}
-	Hooks map[string][]HookMatcherConfig `json:"hooks,omitempty"`
+	// Always emitted: nil renders as `"hooks":null` on the wire.
+	Hooks map[string][]HookMatcherConfig `json:"hooks"`
 	// Agents contains agent definitions keyed by name, sent via stdin
 	// to bypass platform ARG_MAX limits. The value for each agent is a
-	// map of agent fields (description, prompt, tools, model) with
-	// None/empty fields stripped (Python omitempty parity).
+	// map of agent fields with nil/empty Tools and empty Model stripped
+	// at the subprocess boundary (see agentsToMap).
 	Agents map[string]any `json:"agents,omitempty"`
 }
 
