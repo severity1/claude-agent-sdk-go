@@ -21,13 +21,13 @@ subprocess/
 ├── process_test.go       # Process termination tests
 ├── config_test.go        # Environment and MCP config tests
 ├── agents_test.go        # agentsToMap stripping and protocol options wiring tests
-├── mock_cli_test.go      # TestMain + os.Args[0] mock CLI (cross-platform, CLAUDE_SDK_TEST_MOCK_MODE)
+├── mock_cli_test.go      # TestMain + os.Args[0] mock CLI (cross-platform, CLAUDE_SDK_TEST_MOCK_MODE); modes: default, long_running, should_fail, check_environment, invalid_output, with_control_protocol, with_stderr, init_error
 ├── protocol_adapter.go   # ProtocolAdapter for control.Transport interface
 └── protocol_adapter_test.go # Adapter tests
 ```
 
 **Transport Flow**:
-1. `Connect()`: Spawn CLI subprocess with streaming-mode arguments and run the initialize handshake unconditionally (Python SDK PR #468 parity).
+1. `Connect()`: Spawn CLI subprocess with streaming-mode arguments and run the initialize handshake unconditionally (Python SDK PR #468 parity). On `setupControlProtocol` failure, calls `teardownLocked()` to reap the subprocess before returning the error.
 2. `SendMessage()`: Write JSON messages to stdin
 3. `EndInput()`: Close the stdin write side only (stdout still drained). Mirrors Python `transport.end_input()` and is used by Query to signal end-of-input after the prompt write or first ResultMessage.
 4. `handleStdout()`: Read stdout, parse JSON, route messages (io.go)
@@ -39,13 +39,14 @@ subprocess/
 <!-- AUTO-MANAGED: conventions -->
 ## Module-Specific Conventions
 
-- Graceful shutdown: SIGTERM with 5s grace period before SIGKILL; `terminateProcess()` checks `stdoutDone` before signaling - if closed (CLI already exited), returns nil immediately to avoid a race on Windows where `TerminateProcess` on a self-exited process returns `"Access is denied"`; `isProcessAlreadyFinishedError()` treats that string as a non-error alongside the POSIX equivalents
+- Graceful shutdown: SIGTERM with 5s grace period before SIGKILL; `terminateProcess()` checks `stdoutDone` before signaling - if closed (CLI already exited), calls `t.cmd.Wait()` to reap the process and release the exec.Cmd watchCtx goroutine, then returns nil immediately (mirrors Python `subprocess_cli.py:568`; expected signal exits are not surfaced as errors); avoids a race on Windows where `TerminateProcess` on a self-exited process returns `"Access is denied"`; `isProcessAlreadyFinishedError()` treats that string as a non-error alongside the POSIX equivalents
 - Message routing: Distinguish control vs regular messages by type
 - Protocol adapter: Bridges subprocess stdin to `control.Transport` interface
 - Resource cleanup: Always close stdin before waiting for process exit
 - Unified streaming: `New(cliPath, options, entrypoint)` is the single constructor; no `closeStdin` parameter, no `NewWithPrompt`. Prompts are written to stdin via `SendMessage` after `Connect` returns, and `EndInput(ctx)` closes the stdin write side (idempotent) when no more input will come.
 - Init error routing: `routeInitError()` in io.go detects error `ResultMessage` before `t.connected` is set and calls `protocol.HandleControlInitErr()`. A separate stdout-close watcher in `setupControlProtocol` also calls `HandleControlInitErr` when the CLI exits before responding to initialize, so a dying CLI doesn't strand Initialize on its timeout. `formatInitError()` builds error string with priority: `Errors` slice > `Result` field > `Subtype` fallback.
 - Stdout-done channel: `stdoutDone chan struct{}` is allocated per Connect and closed by `handleStdout` on exit. The watcher goroutine and `handleStdout` capture the channel/protocol pointer into locals before reading to avoid races with a subsequent reconnect.
+- Connect failure cleanup: `Connect()` calls `teardownLocked()` when `setupControlProtocol` fails before returning the error. `teardownLocked()` is the unified post-Start cleanup primitive (cancels context, closes protocol, closes stdin, waits goroutines, terminates process, runs cleanup func) shared between `Close()` and the Connect error path. Ensures no subprocess is leaked on a failed connect. `TestTransportConnectFailureTearsDown` + `init_error` mock mode verifies this via `syscall.Signal(0)` probe on the captured PID.
 - Nil protocol guard: `GetMcpStatus()` (and other control delegation methods) return descriptive error `"internal error: transport connected but control protocol is nil"` when `t.protocol == nil` after connected check
 - `buildProtocolOptions()` is split into per-feature helpers (`canUseToolAdapter`, `hooksProtocolOption`, `sdkMcpServersProtocolOption`) to stay under gocyclo 15. The `agents` wiring uses `control.WithAgents(agentsToMap(...))`; `agentsToMap` converts `shared.AgentDefinition` to `map[string]any` at the package boundary so `control` stays free of any `shared` dependency.
 - `agentsToMap` stripping rule (deliberate divergence from Python): `description` and `prompt` always emit; empty `Tools` slice and empty `Model` string are dropped. Python's rule (`if v is not None`) is more permissive - it preserves `tools=[]` and `model=""`. Go is stricter because `AgentDefinition` uses zero-value-as-unset semantics and there is no way for a caller to distinguish "explicit empty" from "unset" with the current field types. Phase 2 #19 (Python PR #684) will introduce nullable optional fields (skills/memory/mcpServers); at that point the per-field strip decision should be re-examined - description/prompt should keep their unconditional treatment.
