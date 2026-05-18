@@ -133,6 +133,13 @@ const (
 type Transport interface {
 	Connect(ctx context.Context) error
 	SendMessage(ctx context.Context, message StreamMessage) error
+	// EndInput signals end-of-input by closing the write side of the
+	// transport (stdin for subprocess transports). The receive direction
+	// stays open until the CLI closes its end. Idempotent. The context is
+	// accepted for symmetry with the other methods; implementations are
+	// not required to honor cancellation since closing a pipe is a fast
+	// non-cancellable syscall.
+	EndInput(ctx context.Context) error
 	ReceiveMessages(ctx context.Context) (<-chan Message, <-chan error)
 	Interrupt(ctx context.Context) error
 	// SetModel changes the AI model during streaming session.

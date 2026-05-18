@@ -1182,6 +1182,10 @@ func (c *clientMockTransport) Interrupt(_ context.Context) error {
 	return nil
 }
 
+func (c *clientMockTransport) EndInput(_ context.Context) error {
+	return nil
+}
+
 func (c *clientMockTransport) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

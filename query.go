@@ -131,12 +131,16 @@ func (qi *queryIterator) maybeEndInputAfterResult(msg Message) {
 	if _, ok := msg.(*ResultMessage); !ok {
 		return
 	}
+	qi.endInput()
+}
+
+// endInput closes the transport's input side at most once for this iterator.
+// EndInput errors are intentionally ignored: the iterator is already past the
+// point where it could surface them, and the CLI will signal failure via
+// stdout/exit if anything depends on this close.
+func (qi *queryIterator) endInput() {
 	qi.endInputOnce.Do(func() {
-		if ender, ok := qi.transport.(interface {
-			EndInput(context.Context) error
-		}); ok {
-			_ = ender.EndInput(qi.ctx)
-		}
+		_ = qi.transport.EndInput(qi.ctx)
 	})
 }
 
@@ -183,13 +187,7 @@ func (qi *queryIterator) start() error {
 
 	qi.endInputAfterFirst = needsBidirectionalStdin(qi.options)
 	if !qi.endInputAfterFirst {
-		qi.endInputOnce.Do(func() {
-			if ender, ok := qi.transport.(interface {
-				EndInput(context.Context) error
-			}); ok {
-				_ = ender.EndInput(qi.ctx)
-			}
-		})
+		qi.endInput()
 	}
 
 	return nil

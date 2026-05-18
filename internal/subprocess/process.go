@@ -28,10 +28,16 @@ func (t *Transport) terminateProcess() error {
 		return nil
 	}
 
-	// stdout closed means the CLI already exited; skip Signal/Kill.
+	// stdout closed means the CLI already exited; skip Signal/Kill but still
+	// reap the process so exec.Cmd releases its watchCtx goroutine and pipe
+	// resources. Wait on an exited process returns immediately; expected
+	// non-zero exit signals (e.g. "signal: killed") are not real errors.
 	if t.stdoutDone != nil {
 		select {
 		case <-t.stdoutDone:
+			if err := t.cmd.Wait(); err != nil && !strings.Contains(err.Error(), "signal:") {
+				return err
+			}
 			return nil
 		default:
 		}
