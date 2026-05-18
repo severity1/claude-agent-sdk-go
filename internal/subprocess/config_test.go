@@ -17,7 +17,7 @@ func TestTransportEnvironmentSetup(t *testing.T) {
 	ctx, cancel := setupTransportTestContext(t, 10*time.Second)
 	defer cancel()
 
-	transport := setupTransportForTest(t, newTransportMockCLIWithOptions(WithEnvironmentCheck()))
+	transport := setupTransportForTest(t, newTransportMockCLIWithOptions(t, WithEnvironmentCheck()))
 	defer disconnectTransportSafely(t, transport)
 
 	// Connection should succeed with proper environment setup
@@ -139,7 +139,7 @@ func TestSubprocessEnvironmentVariables(t *testing.T) {
 			ctx, cancel := setupSubprocessTestContext(t)
 			defer cancel()
 
-			transport := New(newTransportMockCLI(), tt.options, "sdk-go")
+			transport := New(newTransportMockCLI(t), tt.options, "sdk-go")
 			defer func() {
 				if transport.IsConnected() {
 					_ = transport.Close()
@@ -175,7 +175,7 @@ func TestTransportWorkingDirectory(t *testing.T) {
 				options := &shared.Options{
 					Cwd: &cwd,
 				}
-				return New(newTransportMockCLI(), options, "sdk-go")
+				return New(newTransportMockCLI(t), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -194,7 +194,7 @@ func TestTransportWorkingDirectory(t *testing.T) {
 				options := &shared.Options{
 					Cwd: nil,
 				}
-				return New(newTransportMockCLI(), options, "sdk-go")
+				return New(newTransportMockCLI(t), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -225,7 +225,11 @@ func TestTransportWorkingDirectory(t *testing.T) {
 
 // TestTransportMcpServerConfiguration tests MCP server config file generation
 func TestTransportMcpServerConfiguration(t *testing.T) {
-	ctx, cancel := setupTransportTestContext(t, 5*time.Second)
+	// Generous timeout: 6 subtests share this context, and each spawns the
+	// test binary as mock CLI. Under -race that's slower than the legacy
+	// bash fixture, so the budget needs headroom to avoid late-subtest
+	// timeouts.
+	ctx, cancel := setupTransportTestContext(t, 30*time.Second)
 	defer cancel()
 
 	tests := []struct {
@@ -247,7 +251,7 @@ func TestTransportMcpServerConfiguration(t *testing.T) {
 				options := &shared.Options{
 					McpServers: mcpServers,
 				}
-				return New(newTransportMockCLI(), options, "sdk-go")
+				return New(newTransportMockCLI(t), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -296,7 +300,7 @@ func TestTransportMcpServerConfiguration(t *testing.T) {
 				options := &shared.Options{
 					McpServers: mcpServers,
 				}
-				return New(newTransportMockCLI(), options, "sdk-go")
+				return New(newTransportMockCLI(t), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -328,7 +332,7 @@ func TestTransportMcpServerConfiguration(t *testing.T) {
 				options := &shared.Options{
 					McpServers: nil,
 				}
-				return New(newTransportMockCLI(), options, "sdk-go")
+				return New(newTransportMockCLI(t), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -352,7 +356,7 @@ func TestTransportMcpServerConfiguration(t *testing.T) {
 					},
 				}
 				options := &shared.Options{McpServers: mcpServers}
-				return New(newTransportMockCLI(), options, "sdk-go")
+				return New(newTransportMockCLI(t), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -395,7 +399,7 @@ func TestTransportMcpServerConfiguration(t *testing.T) {
 					},
 				}
 				options := &shared.Options{McpServers: mcpServers}
-				return New(newTransportMockCLI(), options, "sdk-go")
+				return New(newTransportMockCLI(t), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()
@@ -439,7 +443,7 @@ func TestTransportMcpServerConfiguration(t *testing.T) {
 					McpServers: mcpServers,
 					ExtraArgs:  map[string]*string{"existing": stringPtr("value")},
 				}
-				return New(newTransportMockCLI(), options, "sdk-go")
+				return New(newTransportMockCLI(t), options, "sdk-go")
 			},
 			validate: func(t *testing.T, transport *Transport) {
 				t.Helper()

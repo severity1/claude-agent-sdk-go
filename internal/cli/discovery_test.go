@@ -475,17 +475,17 @@ func assertContainsArgs(t *testing.T, args []string, flag, value string) {
 func TestFindCLISuccess(t *testing.T) {
 	// Test when CLI is found in PATH
 	t.Run("cli_found_in_path", func(t *testing.T) {
-		// Create a temporary executable file
+		// FindCLI only checks file existence + executability; it never
+		// invokes the binary. A minimal executable placeholder is enough,
+		// no shell-script body required.
 		tempDir := t.TempDir()
 		cliPath := filepath.Join(tempDir, "claude")
 		if runtime.GOOS == windowsOS {
 			cliPath += ".exe"
 		}
 
-		// Create and make executable
-		//nolint:gosec // G306: Test file needs execute permission for mock CLI binary
-		err := os.WriteFile(cliPath, []byte("#!/bin/bash\necho test"), 0o700)
-		if err != nil {
+		//nolint:gosec // G306: Test file needs execute permission for mock CLI binary.
+		if err := os.WriteFile(cliPath, []byte{0}, 0o700); err != nil {
 			t.Fatalf("Failed to create test CLI: %v", err)
 		}
 
@@ -1474,26 +1474,6 @@ func TestCheckCLIVersionSkipEnvVar(t *testing.T) {
 	if warning != "" {
 		t.Errorf("Expected skip when env var set, got: %s", warning)
 	}
-}
-
-// createVersionMockCLI creates a mock CLI script that outputs the given version
-func createVersionMockCLI(t *testing.T, version string) string {
-	t.Helper()
-	tempDir := t.TempDir()
-	mockCLI := filepath.Join(tempDir, "mock-claude")
-	if runtime.GOOS == windowsOS {
-		mockCLI += ".bat"
-		//nolint:gosec // G306: Test file needs execute permission for mock CLI binary
-		if err := os.WriteFile(mockCLI, []byte("@echo off\necho "+version), 0o700); err != nil {
-			t.Fatalf("Failed to create mock CLI: %v", err)
-		}
-	} else {
-		//nolint:gosec // G306: Test file needs execute permission for mock CLI binary
-		if err := os.WriteFile(mockCLI, []byte("#!/bin/bash\necho '"+version+"'"), 0o700); err != nil {
-			t.Fatalf("Failed to create mock CLI: %v", err)
-		}
-	}
-	return mockCLI
 }
 
 // TestSkillsFlagSupport tests that the Skills option transforms AllowedTools
