@@ -252,8 +252,7 @@ func (c *ClientImpl) Connect(ctx context.Context, _ ...StreamMessage) error {
 			return fmt.Errorf("claude CLI not found: %w", err)
 		}
 
-		// Create subprocess transport for streaming mode (closeStdin=false)
-		c.transport = subprocess.New(cliPath, c.options, false, "sdk-go-client")
+		c.transport = subprocess.New(cliPath, c.options, "sdk-go-client")
 	}
 
 	// Connect the transport

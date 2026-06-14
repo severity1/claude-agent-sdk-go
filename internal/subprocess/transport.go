@@ -33,9 +33,7 @@ type Transport struct {
 	cmd        *exec.Cmd
 	cliPath    string
 	options    *shared.Options
-	closeStdin bool
-	promptArg  *string // For one-shot queries, prompt passed as CLI argument
-	entrypoint string  // CLAUDE_CODE_ENTRYPOINT value (sdk-go or sdk-go-client)
+	entrypoint string // CLAUDE_CODE_ENTRYPOINT value (sdk-go or sdk-go-client)
 
 	// Connection state
 	connected bool
@@ -60,6 +58,10 @@ type Transport struct {
 	msgChan chan shared.Message
 	errChan chan error
 
+	// stdoutDone is closed by handleStdout on exit so init-time watchers can
+	// detect the CLI exiting before the initialize handshake completes.
+	stdoutDone chan struct{}
+
 	// Control protocol (for streaming mode only)
 	protocol        *control.Protocol
 	protocolAdapter *ProtocolAdapter
@@ -70,28 +72,16 @@ type Transport struct {
 	wg     sync.WaitGroup
 }
 
-// New creates a new subprocess transport.
-func New(cliPath string, options *shared.Options, closeStdin bool, entrypoint string) *Transport {
+// New creates a new subprocess transport. The transport always uses
+// streaming mode (--input-format stream-json); the prompt for one-shot
+// queries is written to stdin after the initialize handshake.
+func New(cliPath string, options *shared.Options, entrypoint string) *Transport {
 	return &Transport{
 		cliPath:    cliPath,
 		options:    options,
-		closeStdin: closeStdin,
 		entrypoint: entrypoint,
 		parser:     newParser(options),
 		validator:  shared.NewStreamValidator(),
-	}
-}
-
-// NewWithPrompt creates a new subprocess transport for one-shot queries with prompt as CLI argument.
-func NewWithPrompt(cliPath string, options *shared.Options, prompt string) *Transport {
-	return &Transport{
-		cliPath:    cliPath,
-		options:    options,
-		closeStdin: true,
-		entrypoint: "sdk-go", // Query mode uses sdk-go
-		parser:     newParser(options),
-		validator:  shared.NewStreamValidator(),
-		promptArg:  &prompt,
 	}
 }
 
@@ -125,15 +115,9 @@ func (t *Transport) Connect(ctx context.Context) error {
 		return err
 	}
 
-	// Build command with all options
-	var args []string
-	if t.promptArg != nil {
-		// One-shot query with prompt as CLI argument
-		args = cli.BuildCommandWithPrompt(t.cliPath, opts, *t.promptArg)
-	} else {
-		// Streaming mode or regular one-shot
-		args = cli.BuildCommand(t.cliPath, opts, t.closeStdin)
-	}
+	// Build command with all options. Streaming mode is unconditional;
+	// the prompt is written to stdin after initialize, not via --print.
+	args := cli.BuildCommand(t.cliPath, opts)
 	//nolint:gosec // G204: This is the core CLI SDK functionality - subprocess execution is required
 	t.cmd = exec.CommandContext(ctx, args[0], args[1:]...)
 
@@ -171,6 +155,7 @@ func (t *Transport) Connect(ctx context.Context) error {
 	// Initialize channels
 	t.msgChan = make(chan shared.Message, channelBufferSize)
 	t.errChan = make(chan error, channelBufferSize)
+	t.stdoutDone = make(chan struct{})
 
 	// Start I/O handling goroutines
 	t.wg.Add(1)
@@ -182,12 +167,13 @@ func (t *Transport) Connect(ctx context.Context) error {
 		go t.handleStderrCallback()
 	}
 
-	// Note: Do NOT close stdin here for one-shot mode
-	// The CLI still needs stdin to receive the message, even with --print flag
-	// stdin will be closed after sending the message in SendMessage()
-
-	// Set up control protocol for streaming mode only
+	// Set up control protocol and run the initialize handshake. Initialize
+	// is unconditional so the agents map can travel on the initialize
+	// request rather than via argv. Failure here means the subprocess is
+	// running but we cannot use it - tear down so the process is reaped
+	// and goroutines exit.
 	if err := t.setupControlProtocol(t.ctx); err != nil {
+		_ = t.teardownLocked()
 		return err
 	}
 
@@ -195,53 +181,49 @@ func (t *Transport) Connect(ctx context.Context) error {
 	return nil
 }
 
-// setupControlProtocol initializes control protocol for streaming mode.
-// Returns nil immediately for one-shot mode (closeStdin == true).
+// setupControlProtocol starts the control protocol and runs the initialize
+// handshake. The handshake is unconditional so the agents map always
+// reaches the CLI on every connection.
 func (t *Transport) setupControlProtocol(ctx context.Context) error {
-	if t.closeStdin {
-		return nil // One-shot mode doesn't need control protocol
-	}
-
 	t.protocolAdapter = NewProtocolAdapter(t.stdin)
 	t.protocol = control.NewProtocol(t.protocolAdapter, t.buildProtocolOptions()...)
 
 	if err := t.protocol.Start(ctx); err != nil {
-		t.cleanup()
 		return fmt.Errorf("failed to start control protocol: %w", err)
 	}
 
-	// Perform handshake when hooks, permissions, checkpointing, or SDK MCP servers configured
-	if t.needsProtocolHandshake() {
-		if _, err := t.protocol.Initialize(ctx); err != nil {
-			t.cleanup()
-			return fmt.Errorf("failed to initialize control protocol: %w", err)
+	// Watch for stdout closure so a CLI that dies before responding to
+	// initialize unblocks the handshake instead of waiting for timeout.
+	// Capture channel/protocol locally so the goroutine doesn't race with a
+	// subsequent Connect() reassigning t.stdoutDone or t.protocol.
+	//
+	// initDone closes AFTER Initialize returns (below), so the watcher
+	// exits cleanly on the success path. Any late stdoutDone fires from
+	// after that are absorbed by HandleControlInitErr's post-init guard.
+	initDone := make(chan struct{})
+	stdoutDone := t.stdoutDone
+	protocol := t.protocol
+	go func() {
+		select {
+		case <-initDone:
+		case <-stdoutDone:
+			protocol.HandleControlInitErr(fmt.Errorf("CLI process exited before initialize handshake completed"))
 		}
+	}()
+
+	_, err := t.protocol.Initialize(ctx)
+	close(initDone)
+	if err != nil {
+		return fmt.Errorf("failed to initialize control protocol: %w", err)
 	}
 
 	return nil
 }
 
-// needsProtocolHandshake returns true if control protocol handshake is required.
-func (t *Transport) needsProtocolHandshake() bool {
-	if t.options == nil {
-		return false
-	}
-	return t.options.Hooks != nil ||
-		t.options.CanUseTool != nil ||
-		t.options.EnableFileCheckpointing ||
-		t.hasSdkMcpServers()
-}
-
-// SendMessage sends a message to the CLI subprocess.
+// SendMessage sends a message to the CLI subprocess via stdin.
 func (t *Transport) SendMessage(ctx context.Context, message shared.StreamMessage) error {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-
-	// For one-shot queries with promptArg, the prompt is already passed as CLI argument
-	// so we don't need to send any messages via stdin
-	if t.promptArg != nil {
-		return nil // No-op for one-shot queries
-	}
 
 	if !t.connected || t.stdin == nil {
 		return fmt.Errorf("transport not connected or stdin closed")
@@ -261,17 +243,29 @@ func (t *Transport) SendMessage(ctx context.Context, message shared.StreamMessag
 	}
 
 	// Send with newline
-	_, err = t.stdin.Write(append(data, '\n'))
-	if err != nil {
+	if _, err := t.stdin.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("failed to write message: %w", err)
 	}
 
-	// For one-shot mode, close stdin after sending the message
-	if t.closeStdin {
-		_ = t.stdin.Close()
-		t.stdin = nil
-	}
+	return nil
+}
 
+// EndInput closes the stdin write side, signaling end-of-input to the CLI
+// while leaving stdout/stderr open so messages can still be received.
+// Idempotent: subsequent calls return nil. The context is unused because
+// os.File.Close is a fast non-cancellable syscall.
+func (t *Transport) EndInput(_ context.Context) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.stdin == nil {
+		return nil
+	}
+	err := t.stdin.Close()
+	t.stdin = nil
+	if err != nil {
+		return fmt.Errorf("failed to close stdin: %w", err)
+	}
 	return nil
 }
 
@@ -320,7 +314,14 @@ func (t *Transport) Close() error {
 	}
 
 	t.connected = false
+	return t.teardownLocked()
+}
 
+// teardownLocked closes the control protocol, cancels the context, closes
+// stdin, waits for I/O goroutines, terminates the subprocess, and clears
+// resources. Caller must hold t.mu. Safe to call from any post-Start state -
+// each field is nil-checked. Used by both Close and Connect's error path.
+func (t *Transport) teardownLocked() error {
 	// Close control protocol first (before cancelling context)
 	if t.protocol != nil {
 		_ = t.protocol.Close()
@@ -331,40 +332,32 @@ func (t *Transport) Close() error {
 		t.protocolAdapter = nil
 	}
 
-	// Cancel context to stop goroutines
 	if t.cancel != nil {
 		t.cancel()
 	}
 
-	// Close stdin if open
 	if t.stdin != nil {
 		_ = t.stdin.Close()
 		t.stdin = nil
 	}
 
-	// Wait for goroutines to finish with timeout
+	// Wait for goroutines to finish with timeout.
 	done := make(chan struct{})
 	go func() {
 		t.wg.Wait()
 		close(done)
 	}()
-
 	select {
 	case <-done:
-		// Goroutines finished gracefully
 	case <-time.After(terminationTimeoutSeconds * time.Second):
-		// Timeout: proceed with cleanup anyway
-		// Goroutines should terminate when process is killed
+		// Goroutines should terminate when the process is killed below.
 	}
 
-	// Terminate process with 5-second timeout
 	var err error
 	if t.cmd != nil && t.cmd.Process != nil {
 		err = t.terminateProcess()
 	}
 
-	// Cleanup resources
 	t.cleanup()
-
 	return err
 }

@@ -534,7 +534,8 @@ func TestCreateQueryTransport(t *testing.T) {
 			defer cleanup()
 
 			// Call createQueryTransport directly - this will exercise the real function
-			transport, err := createQueryTransport(test.prompt, test.options)
+			_ = test.prompt
+			transport, err := createQueryTransport(test.options)
 
 			if test.expectError {
 				if err == nil {
@@ -812,6 +813,7 @@ type queryMockTransport struct {
 	sendError        error
 	delay            time.Duration
 	optionsReceived  bool
+	endInputCalls    int
 }
 
 func (q *queryMockTransport) Connect(ctx context.Context) error {
@@ -899,6 +901,13 @@ func (q *queryMockTransport) ReceiveMessages(_ context.Context) (<-chan Message,
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 	return q.msgChan, q.errChan
+}
+
+func (q *queryMockTransport) EndInput(_ context.Context) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.endInputCalls++
+	return nil
 }
 
 func (q *queryMockTransport) Interrupt(_ context.Context) error {

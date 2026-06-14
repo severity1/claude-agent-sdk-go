@@ -105,43 +105,17 @@ func getCommonCLILocations() []string {
 }
 
 // BuildCommand constructs the CLI command with all necessary flags.
-func BuildCommand(cliPath string, options *shared.Options, closeStdin bool) []string {
+// Always uses streaming mode (--input-format stream-json); prompts are
+// written to stdin after the initialize handshake instead of via --print.
+func BuildCommand(cliPath string, options *shared.Options) []string {
 	cmd := []string{cliPath}
 
-	// Base arguments - always include these
 	cmd = append(cmd, "--output-format", "stream-json", "--verbose")
+	cmd = append(cmd, "--input-format", "stream-json")
 
-	// Input mode configuration
-	if closeStdin {
-		// One-shot mode (Query function)
-		cmd = append(cmd, "--print")
-	} else {
-		// Streaming mode (Client interface)
-		cmd = append(cmd, "--input-format", "stream-json")
-	}
-
-	// Add all configuration options as CLI flags
 	if options != nil {
 		cmd = addOptionsToCommand(cmd, options)
 	}
-
-	return cmd
-}
-
-// BuildCommandWithPrompt constructs the CLI command for one-shot queries with prompt as argument.
-func BuildCommandWithPrompt(cliPath string, options *shared.Options, prompt string) []string {
-	cmd := []string{cliPath}
-
-	// Base arguments - always include these
-	cmd = append(cmd, "--output-format", "stream-json", "--verbose")
-
-	// Add all configuration options as CLI flags before the prompt
-	if options != nil {
-		cmd = addOptionsToCommand(cmd, options)
-	}
-
-	// Prompt must be last so the CLI parses all flags (e.g. --mcp-config) correctly
-	cmd = append(cmd, "--print", prompt)
 
 	return cmd
 }
@@ -161,7 +135,6 @@ func addOptionsToCommand(cmd []string, options *shared.Options) []string {
 	cmd = addModelAndPromptFlags(cmd, options)
 	cmd = addPermissionFlags(cmd, options)
 	cmd = addSessionFlags(cmd, options)
-	cmd = addAgentFlags(cmd, options)
 	cmd = addFileSystemFlags(cmd, options)
 	cmd = addMCPFlags(cmd, options)
 	cmd = addPluginsFlag(cmd, options)
@@ -272,36 +245,6 @@ func addSessionFlags(cmd []string, options *shared.Options) []string {
 		cmd = append(cmd, "--include-partial-messages")
 	}
 	return cmd
-}
-
-func addAgentFlags(cmd []string, options *shared.Options) []string {
-	if len(options.Agents) == 0 {
-		return cmd
-	}
-
-	// Convert to map[string]map[string]any, filtering nil/empty fields
-	// This matches Python SDK behavior of omitting None values
-	agentsMap := make(map[string]map[string]any)
-	for name, agent := range options.Agents {
-		agentMap := map[string]any{
-			"description": agent.Description,
-			"prompt":      agent.Prompt,
-		}
-		if len(agent.Tools) > 0 {
-			agentMap["tools"] = agent.Tools
-		}
-		if agent.Model != "" {
-			agentMap["model"] = string(agent.Model)
-		}
-		agentsMap[name] = agentMap
-	}
-
-	data, err := json.Marshal(agentsMap)
-	if err != nil {
-		return cmd // Skip on serialization error
-	}
-
-	return append(cmd, "--agents", string(data))
 }
 
 func addFileSystemFlags(cmd []string, options *shared.Options) []string {

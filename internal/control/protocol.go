@@ -61,6 +61,9 @@ type Protocol struct {
 	// SDK MCP servers for in-process tool handling
 	sdkMcpServers map[string]McpServer
 
+	// agents travel in the initialize control request, bypassing argv size limits.
+	agents map[string]any
+
 	// Background goroutine management
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -106,6 +109,15 @@ func WithHookCallbacks(callbacks map[string]HookCallback) ProtocolOption {
 func WithSdkMcpServers(servers map[string]McpServer) ProtocolOption {
 	return func(p *Protocol) {
 		p.sdkMcpServers = servers
+	}
+}
+
+// WithAgents configures agent definitions to be sent in the initialize
+// request. Agents travel via the control protocol over stdin so the
+// payload size is bounded by stdin buffering rather than argv limits.
+func WithAgents(agents map[string]any) ProtocolOption {
+	return func(p *Protocol) {
+		p.agents = agents
 	}
 }
 
@@ -253,7 +265,17 @@ func (p *Protocol) SendControlRequest(ctx context.Context, request any, timeout 
 // HandleControlInitErr reports an initialization error back to any pending
 // SendControlRequest, unblocking it when the CLI returns an error result
 // instead of a control protocol response (e.g., invalid session ID).
+//
+// No-op once the handshake has succeeded: a late stdout-close notification
+// after a successful Initialize must not poison `initErrChan` for the next
+// SendControlRequest (e.g. SetModel/GetMcpStatus from a long-lived client).
 func (p *Protocol) HandleControlInitErr(err error) {
+	p.mu.Lock()
+	initialized := p.initialized
+	p.mu.Unlock()
+	if initialized {
+		return
+	}
 	select {
 	case p.initErrChan <- err:
 	default:
@@ -391,14 +413,15 @@ func (p *Protocol) sendErrorResponse(ctx context.Context, requestID string, errM
 // calls return the same error and will not retry even with a fresh context.
 func (p *Protocol) Initialize(ctx context.Context) (*InitializeResponse, error) {
 	p.initOnce.Do(func() {
-		// Build initialize request with hooks configuration
+		// Hooks is always assigned (nil when none registered) so the
+		// wire body always carries the `"hooks"` key.
 		initReq := InitializeRequest{
 			Subtype: SubtypeInitialize,
+			Hooks:   p.buildHooksConfig(),
 		}
 
-		// Generate hook registrations and build hooks config
-		if p.hooks != nil {
-			initReq.Hooks = p.buildHooksConfig()
+		if len(p.agents) > 0 {
+			initReq.Agents = p.agents
 		}
 
 		// Send initialize request

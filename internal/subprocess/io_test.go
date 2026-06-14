@@ -2,7 +2,6 @@ package subprocess
 
 import (
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -84,12 +83,15 @@ func strPtr(s string) *string {
 
 // TestTransportHandleStdoutErrorPaths tests uncovered handleStdout scenarios
 func TestTransportHandleStdoutErrorPaths(t *testing.T) {
-	ctx, cancel := setupTransportTestContext(t, 5*time.Second)
+	// Generous timeout: subtests spawn the test binary as mock CLI; under
+	// -race each spawn costs ~hundreds of ms (vs sub-ms for the legacy bash
+	// fixture), so the shared parent context budget needs headroom.
+	ctx, cancel := setupTransportTestContext(t, 30*time.Second)
 	defer cancel()
 
 	// Test stdout parsing errors
 	t.Run("stdout_parsing_errors", func(t *testing.T) {
-		transport := setupTransportForTest(t, newTransportMockCLIWithOptions(WithInvalidOutput()))
+		transport := setupTransportForTest(t, newTransportMockCLIWithOptions(t, WithInvalidOutput()))
 		defer disconnectTransportSafely(t, transport)
 
 		connectTransportSafely(ctx, t, transport)
@@ -119,7 +121,7 @@ func TestTransportHandleStdoutErrorPaths(t *testing.T) {
 
 	// Test scanner error conditions
 	t.Run("scanner_error_handling", func(t *testing.T) {
-		transport := setupTransportForTest(t, newTransportMockCLI())
+		transport := setupTransportForTest(t, newTransportMockCLI(t))
 		defer disconnectTransportSafely(t, transport)
 
 		connectTransportSafely(ctx, t, transport)
@@ -346,10 +348,9 @@ func TestStderrCallbackWithMockCLI(t *testing.T) {
 	}
 
 	// Create a mock CLI that outputs to stderr
-	cliPath := newTransportMockCLIWithStderr()
-	defer func() { _ = os.Remove(cliPath) }()
+	cliPath := newTransportMockCLIWithStderr(t)
 
-	transport := New(cliPath, options, false, "sdk-go")
+	transport := New(cliPath, options, "sdk-go")
 	defer disconnectTransportSafely(t, transport)
 
 	err := transport.Connect(ctx)
@@ -366,33 +367,4 @@ func TestStderrCallbackWithMockCLI(t *testing.T) {
 	if receivedCount == 0 {
 		t.Log("No stderr lines received - this may be expected if mock CLI doesn't output to stderr")
 	}
-}
-
-// newTransportMockCLIWithStderr creates a mock CLI that outputs to stderr
-func newTransportMockCLIWithStderr() string {
-	var script string
-	var extension string
-
-	if runtime.GOOS == windowsOS {
-		extension = testBatExtension
-		script = `@echo off
-if "%1"=="-v" (echo 3.0.0 & exit /b 0)
-echo Stderr line 1 >&2
-echo Stderr line 2 >&2
-echo {"type":"assistant","content":[{"type":"text","text":"Mock response"}],"model":"claude-3"}
-timeout /t 1 /nobreak > NUL
-`
-	} else {
-		extension = ""
-		script = `#!/bin/bash
-# Handle -v flag for version check
-if [ "$1" = "-v" ]; then echo "3.0.0"; exit 0; fi
-echo "Stderr line 1" >&2
-echo "Stderr line 2" >&2
-echo '{"type":"assistant","content":[{"type":"text","text":"Mock response"}],"model":"claude-3"}'
-sleep 0.5
-`
-	}
-
-	return createTransportTempScript(script, extension)
 }

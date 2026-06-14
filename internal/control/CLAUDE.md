@@ -18,11 +18,12 @@ control/
 ├── permissions.go         # Permission callback handling, response building
 ├── types.go               # Request/Response types, Initialize handshake
 ├── types_hook.go          # Hook event types, HookMatcher, HookCallback
-├── protocol_test.go       # Protocol unit tests
-├── protocol_bench_test.go # Performance benchmarks
-├── hooks_test.go          # Hook system tests
-├── mcp_test.go            # MCP server tests
-└── types_hook_test.go     # Hook type tests
+├── protocol_test.go          # Protocol unit tests
+├── protocol_bench_test.go    # Performance benchmarks
+├── hooks_test.go             # Hook system tests
+├── mcp_test.go               # MCP server tests
+├── types_hook_test.go        # Hook type tests
+└── initialize_agents_test.go # Agents field in InitializeRequest tests
 ```
 
 **Protocol Flow**:
@@ -41,11 +42,12 @@ control/
 - Thread safety: All state access protected by mutex
 - Timeout handling: Default 60s init timeout, configurable via `WithInitTimeout`
 - Hook registration: `RegisterHook()` returns callback ID for later removal
-- Init error channel: `initErrChan chan error` (buffered, size 1) in Protocol struct; `HandleControlInitErr()` sends non-blocking to unblock `SendControlRequest()` when CLI fails before handshake (e.g., invalid session ID)
+- Init error channel: `initErrChan chan error` (buffered, size 1) in Protocol struct; `HandleControlInitErr()` sends non-blocking to unblock `SendControlRequest()` when CLI fails before handshake (e.g., invalid session ID); reads `p.initialized` under lock first and is a no-op after `Initialize()` succeeds - prevents the post-init stdoutDone watcher from poisoning `initErrChan` for later `SendControlRequest` calls (e.g. `SetModel`/`GetMcpStatus` on a long-lived client)
 - Constructor pattern: `NewGetMcpStatusRequest()` sets `Subtype: SubtypeGetMcpStatus`; follows same pattern as `NewPermissionResultAllow/Deny`; use constructors for request types with fixed subtype values
 - SubtypeGetMcpStatus = `"mcp_status"` (wire value from Python SDK query.py); included in parity table in `testSubtypeConstants`
 - McpServerConfigType constants: `McpServerConfigTypeStdio/SSE/HTTP/SDK/ClaudeAI` discriminate `McpServerStatusConfig.Type`
 - McpServerStatus conditional fields: `ServerInfo` non-nil only when connected; `Error` non-nil only when failed; `Tools` populated only when connected
+- Agents on initialize (Python SDK PR #468): `InitializeRequest.Agents map[string]any json:"agents,omitempty"` carries agent definitions over the control protocol instead of the deprecated `--agents` CLI flag, bypassing platform ARG_MAX limits. Configure via `WithAgents(map[string]any) ProtocolOption`. Type is `map[string]any` (not `map[string]shared.AgentDefinition`) so the `control` package stays free of any `shared` dependency - subprocess does the conversion in `agentsToMap`. `Initialize()` always sends the request now (the old gate on hooks/permissions/MCP was removed) so agents always flow on every connection.
 - Hook event count: 10 as of Python SDK PR #545 (added `Notification`, `SubagentStart`, `PermissionRequest` to the 7 from PR #535); const block order in types_hook.go: PreToolUse, PostToolUse, PostToolUseFailure, UserPromptSubmit, Stop, SubagentStop, PreCompact, Notification, SubagentStart, PermissionRequest
 - New hook input structs (PR #545): `NotificationHookInput` (Message, Title *string omitempty, NotificationType); `SubagentStartHookInput` (AgentID, AgentType); `PermissionRequestHookInput` (ToolName, ToolInput map[string]any, PermissionSuggestions []any omitempty) - intentionally no agent_id/agent_type until Phase2 item #13 (Python PR #628)
 - New hook output structs (PR #545): `NotificationHookSpecificOutput`, `SubagentStartHookSpecificOutput` (both: HookEventName + AdditionalContext *string omitempty); `PermissionRequestHookSpecificOutput` (HookEventName + Decision map[string]any - required, no omitempty)
