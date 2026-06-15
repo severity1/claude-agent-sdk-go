@@ -83,6 +83,14 @@ func (t *Transport) handleStdout() {
 			case <-t.ctx.Done():
 				return
 			}
+
+			// Check if this is a ResultMessage, which indicates completion
+			// In client streaming mode, this is the natural end of the response
+			if _, isResult := msg.(*shared.ResultMessage); isResult {
+				// ResultMessage signals response completion - break Scanner loop
+				// This ensures defer cleanup executes and channels close properly
+				return
+			}
 		}
 	}
 
