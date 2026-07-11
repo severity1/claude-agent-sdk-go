@@ -1150,6 +1150,34 @@ not valid json
 	}
 }
 
+// Regression: a transcript line can exceed 1MB (e.g. a base64-embedded PDF
+// attachment). Parsing must not fail with bufio.Scanner's "token too long".
+func TestParseJSONLHandlesOversizedLines(t *testing.T) {
+	_, projDir := setupTestProject(t)
+
+	// ~2MB of base64-looking payload embedded in one user message.
+	bigData := strings.Repeat("JVBERi0xLjYNJeLj", 128*1024)
+	path := filepath.Join(projDir, "oversized.jsonl")
+	content := `{"type":"user","uuid":"u1","message":{"role":"user","content":"hello"},"timestamp":"2026-01-01T00:00:00Z"}
+{"type":"user","uuid":"u2","message":{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` + bigData + `"}}]},"timestamp":"2026-01-01T00:00:01Z"}
+{"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"read it"}]},"timestamp":"2026-01-01T00:00:02Z"}
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("writing file: %v", err)
+	}
+
+	entries, err := parseJSONLFile(path)
+	if err != nil {
+		t.Fatalf("parseJSONLFile() error: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3 (oversized line must parse, not abort the read)", len(entries))
+	}
+	if entries[2].entryType != "assistant" {
+		t.Errorf("entries[2].entryType = %q, want %q (entries after the oversized line must survive)", entries[2].entryType, "assistant")
+	}
+}
+
 // --- Worktree support tests ---
 
 func TestGetWorktreePaths(t *testing.T) {

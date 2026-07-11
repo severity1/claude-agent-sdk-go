@@ -505,25 +505,7 @@ func parseJSONLFile(path string) (entries []jsonlEntry, err error) {
 		}
 	}()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var raw map[string]any
-		if uerr := json.Unmarshal(line, &raw); uerr != nil {
-			continue // skip malformed lines
-		}
-		typ, _ := raw["type"].(string)
-		entries = append(entries, jsonlEntry{entryType: typ, raw: raw})
-	}
-	if serr := scanner.Err(); serr != nil {
-		return nil, fmt.Errorf("scanning JSONL file: %w", serr)
-	}
-	return entries, nil
+	return parseJSONLFromReader(f)
 }
 
 // maxFirstPromptLen is the maximum length of the first prompt (truncated with ellipsis).
@@ -693,27 +675,31 @@ func parseJSONLHeadTail(path string, bufSize int64) (entries []jsonlEntry, err e
 }
 
 // parseJSONLFromReader reads all lines from an already-opened file.
+// Lines can be arbitrarily long (a base64-embedded document attachment
+// exceeds bufio.Scanner's default-style caps), so read with bufio.Reader,
+// which grows to fit each line instead of erroring.
 func parseJSONLFromReader(f *os.File) ([]jsonlEntry, error) {
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	r := bufio.NewReaderSize(f, 64*1024)
 
 	var entries []jsonlEntry
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
+	for {
+		line, rerr := r.ReadBytes('\n')
+		line = bytes.TrimRight(line, "\r\n")
+		if len(line) > 0 {
+			var raw map[string]any
+			if err := json.Unmarshal(line, &raw); err == nil {
+				typ, _ := raw["type"].(string)
+				entries = append(entries, jsonlEntry{entryType: typ, raw: raw})
+			}
+			// skip malformed lines
 		}
-		var raw map[string]any
-		if err := json.Unmarshal(line, &raw); err != nil {
-			continue
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				return entries, nil
+			}
+			return nil, fmt.Errorf("scanning JSONL file: %w", rerr)
 		}
-		typ, _ := raw["type"].(string)
-		entries = append(entries, jsonlEntry{entryType: typ, raw: raw})
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scanning JSONL file: %w", err)
-	}
-	return entries, nil
 }
 
 // parseLinesFromBytes parses complete JSONL lines from a byte buffer.
