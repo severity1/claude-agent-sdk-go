@@ -2,6 +2,7 @@ package subprocess
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,29 @@ import (
 	"github.com/severity1/claude-agent-sdk-go/internal/parser"
 	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
+
+var errStdoutEOFDuringInit = errors.New("stdout EOF before control response")
+
+func (t *Transport) reportInitializationFailure(err error) {
+	if err == nil || t.initFailure == nil {
+		return
+	}
+	select {
+	case t.initFailure <- err:
+	default:
+	}
+}
+
+func (t *Transport) reportStreamError(err error) {
+	if err == nil {
+		return
+	}
+	t.reportInitializationFailure(err)
+	select {
+	case t.errChan <- err:
+	case <-t.ctx.Done():
+	}
+}
 
 // handleStdout processes stdout in a separate goroutine
 func (t *Transport) handleStdout() {
@@ -40,15 +64,15 @@ func (t *Transport) handleStdout() {
 		if line == "" {
 			continue
 		}
+		if !json.Valid([]byte(line)) {
+			t.reportStreamError(errors.New("invalid JSONL control record"))
+			continue
+		}
 
 		// Parse line with the parser
 		messages, err := t.parser.ProcessLine(line)
 		if err != nil {
-			select {
-			case t.errChan <- err:
-			case <-t.ctx.Done():
-				return
-			}
+			t.reportStreamError(err)
 			continue
 		}
 
@@ -69,7 +93,9 @@ func (t *Transport) handleStdout() {
 				if t.protocol != nil {
 					// HandleIncomingMessage routes control responses to pending requests
 					// and forwards non-control messages to the protocol's message stream
-					_ = t.protocol.HandleIncomingMessage(t.ctx, rawCtrl.Data)
+					if err := t.protocol.HandleIncomingMessage(t.ctx, rawCtrl.Data); err != nil {
+						t.reportStreamError(err)
+					}
 				}
 				// Don't send control messages to msgChan - they're internal to the protocol
 				continue
@@ -87,11 +113,10 @@ func (t *Transport) handleStdout() {
 	}
 
 	if err := scanner.Err(); err != nil {
-		select {
-		case t.errChan <- fmt.Errorf("stdout scanner error: %w", err):
-		case <-t.ctx.Done():
-		}
+		t.reportStreamError(fmt.Errorf("stdout scanner error: %w", err))
+		return
 	}
+	t.reportInitializationFailure(errStdoutEOFDuringInit)
 }
 
 // handleStderrCallback processes stderr in a separate goroutine.
@@ -134,7 +159,7 @@ func (t *Transport) handleStderrCallback() {
 // unblock Initialize().
 func (t *Transport) routeInitError(msg shared.Message) {
 	resultMsg, ok := msg.(*shared.ResultMessage)
-	if !ok || t.connected || !resultMsg.IsError || t.protocol == nil {
+	if !ok || !resultMsg.IsError || t.protocol == nil || t.protocol.IsInitialized() {
 		return
 	}
 	t.protocol.HandleControlInitErr(errors.New(formatInitError(resultMsg)))

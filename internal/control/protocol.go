@@ -39,6 +39,7 @@ type Protocol struct {
 
 	// State
 	initialized  bool
+	initializing bool
 	initOnce     sync.Once
 	initErr      error
 	initResponse *InitializeResponse
@@ -318,10 +319,14 @@ func (p *Protocol) handleControlResponse(_ context.Context, msg map[string]any) 
 
 	p.mu.Lock()
 	responseChan, exists := p.pendingRequests[requestID]
+	initializing := p.initializing
 	p.mu.Unlock()
 
 	if !exists {
-		// Response for unknown request - ignore (could be stale or from another session)
+		if initializing {
+			return fmt.Errorf("control response request ID mismatch: received %q", requestID)
+		}
+		// Outside initialization, a response can be stale from an earlier request.
 		return nil
 	}
 
@@ -391,6 +396,15 @@ func (p *Protocol) sendErrorResponse(ctx context.Context, requestID string, errM
 // calls return the same error and will not retry even with a fresh context.
 func (p *Protocol) Initialize(ctx context.Context) (*InitializeResponse, error) {
 	p.initOnce.Do(func() {
+		p.mu.Lock()
+		p.initializing = true
+		p.mu.Unlock()
+		defer func() {
+			p.mu.Lock()
+			p.initializing = false
+			p.mu.Unlock()
+		}()
+
 		// Build initialize request with hooks configuration
 		initReq := InitializeRequest{
 			Subtype: SubtypeInitialize,
@@ -432,6 +446,13 @@ func (p *Protocol) Initialize(ctx context.Context) (*InitializeResponse, error) 
 	p.mu.Unlock()
 
 	return resp, err
+}
+
+// IsInitialized reports whether the initialize handshake completed.
+func (p *Protocol) IsInitialized() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.initialized
 }
 
 // Interrupt sends an interrupt control request to the CLI.

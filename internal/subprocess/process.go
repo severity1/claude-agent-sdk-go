@@ -1,11 +1,53 @@
 package subprocess
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
+
+const processExitArbitrationDelay = 25 * time.Millisecond
+
+type processResult struct {
+	err      error
+	exitCode int
+}
+
+// startProcessWaiter establishes the sole cmd.Wait owner for this process.
+func (t *Transport) startProcessWaiter() {
+	done := make(chan struct{})
+	cmd := t.cmd
+	t.processMu.Lock()
+	t.processDone = done
+	t.processResult = processResult{}
+	t.processMu.Unlock()
+
+	go func() {
+		err := cmd.Wait()
+		exitCode := 0
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+		t.processMu.Lock()
+		t.processResult = processResult{err: err, exitCode: exitCode}
+		t.processMu.Unlock()
+		close(done)
+	}()
+}
+
+func (t *Transport) processExitBeforeControlResponseError() error {
+	t.processMu.RLock()
+	result := t.processResult
+	t.processMu.RUnlock()
+	if result.err == nil && result.exitCode == 0 {
+		return fmt.Errorf("process exited before control response")
+	}
+	return shared.NewProcessError("process exited before control response", result.exitCode, "")
+}
 
 // isProcessAlreadyFinishedError checks if an error indicates the process has already terminated.
 // This follows the Python SDK pattern of suppressing "process not found" type errors.
@@ -20,91 +62,114 @@ func isProcessAlreadyFinishedError(err error) bool {
 		strings.Contains(errStr, "signal: killed")
 }
 
-// terminateProcess implements the 5-second SIGTERM -> SIGKILL sequence
+// terminateProcess implements the 5-second SIGTERM -> SIGKILL sequence. It
+// never calls cmd.Wait; startProcessWaiter is the sole Wait owner.
 func (t *Transport) terminateProcess() error {
-	if t.cmd == nil || t.cmd.Process == nil {
+	if t.cmd == nil || t.cmd.Process == nil || t.processDone == nil {
 		return nil
 	}
-
-	// Send SIGTERM
-	if err := t.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		// If process is already finished, that's success
-		if isProcessAlreadyFinishedError(err) {
-			return nil
-		}
-		// If SIGTERM fails for other reasons, try SIGKILL immediately
-		killErr := t.cmd.Process.Kill()
-		if killErr != nil && !isProcessAlreadyFinishedError(killErr) {
-			return killErr
-		}
-		return nil // Don't return error for expected termination
-	}
-
-	// Wait exactly 5 seconds
-	done := make(chan error, 1)
-	// Capture cmd while we know it's valid to avoid data race
-	cmd := t.cmd
-	go func() {
-		done <- cmd.Wait()
-	}()
 
 	select {
-	case err := <-done:
-		// Normal termination or expected signals are not errors
-		if err != nil {
-			// Check if it's an expected exit signal
-			if strings.Contains(err.Error(), "signal:") {
-				return nil // Expected signal termination
+	case <-t.processDone:
+		return nil
+	default:
+	}
+
+	if err := t.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		if !isProcessAlreadyFinishedError(err) {
+			if killErr := t.cmd.Process.Kill(); killErr != nil && !isProcessAlreadyFinishedError(killErr) {
+				return killErr
 			}
 		}
-		return err
+		return t.waitForProcessReap()
+	}
+
+	select {
+	case <-t.processDone:
+		return nil
 	case <-time.After(terminationTimeoutSeconds * time.Second):
-		// Force kill after 5 seconds
 		if killErr := t.cmd.Process.Kill(); killErr != nil && !isProcessAlreadyFinishedError(killErr) {
 			return killErr
 		}
-		// Wait for process to exit after kill
-		<-done
-		return nil
-	case <-t.ctx.Done():
-		// Context canceled - force kill immediately
-		if killErr := t.cmd.Process.Kill(); killErr != nil && !isProcessAlreadyFinishedError(killErr) {
-			return killErr
-		}
-		// Wait for process to exit after kill, but don't return context error
-		// since this is normal cleanup behavior
-		<-done
-		return nil
+		return t.waitForProcessReap()
 	}
 }
 
-// cleanup cleans up all resources
+func (t *Transport) waitForProcessReap() error {
+	select {
+	case <-t.processDone:
+		return nil
+	case <-time.After(terminationTimeoutSeconds * time.Second):
+		return fmt.Errorf("timed out waiting for process reap after SIGKILL")
+	}
+}
+
+// closeStartedProcess handles failed Connect paths, where connected was never
+// published but the child still has to be terminated and reaped.
+func (t *Transport) closeStartedProcess() error {
+	if t.protocol != nil {
+		_ = t.protocol.Close()
+	}
+	if t.protocolAdapter != nil {
+		_ = t.protocolAdapter.Close()
+	}
+	if t.stdin != nil {
+		_ = t.stdin.Close()
+		t.stdin = nil
+	}
+	err := t.terminateProcess()
+	if t.cancel != nil {
+		t.cancel()
+	}
+	t.wg.Wait()
+	t.cleanup()
+	return err
+}
+
+// cleanup cleans up all resources. Started processes must be reaped before it
+// is called; this method never owns process termination.
 func (t *Transport) cleanup() {
+	if t.cancel != nil {
+		t.cancel()
+	}
+	if t.protocol != nil {
+		_ = t.protocol.Close()
+		t.protocol = nil
+	}
+	if t.protocolAdapter != nil {
+		_ = t.protocolAdapter.Close()
+		t.protocolAdapter = nil
+	}
+	if t.stdin != nil {
+		_ = t.stdin.Close()
+		t.stdin = nil
+	}
 	if t.stdout != nil {
 		_ = t.stdout.Close()
 		t.stdout = nil
 	}
-
 	if t.stderrPipe != nil {
 		_ = t.stderrPipe.Close()
 		t.stderrPipe = nil
 	}
-
 	if t.stderr != nil {
-		// Graceful cleanup matching Python SDK pattern
-		// Python: except Exception: pass
 		_ = t.stderr.Close()
-		_ = os.Remove(t.stderr.Name()) // Ignore cleanup errors
+		_ = os.Remove(t.stderr.Name())
 		t.stderr = nil
 	}
-
 	if t.mcpConfigFile != nil {
-		// Clean up temporary MCP config file
 		_ = t.mcpConfigFile.Close()
-		_ = os.Remove(t.mcpConfigFile.Name()) // Ignore cleanup errors
+		_ = os.Remove(t.mcpConfigFile.Name())
 		t.mcpConfigFile = nil
 	}
 
-	// Reset state
 	t.cmd = nil
+	t.ctx = nil
+	t.cancel = nil
+	t.connected = false
+	t.initFailure = nil
+	t.processMu.Lock()
+	t.processDone = nil
+	t.processResult = processResult{}
+	t.processMu.Unlock()
 }
