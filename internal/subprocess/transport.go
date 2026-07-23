@@ -4,6 +4,7 @@ package subprocess
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,12 +31,15 @@ const (
 // Transport implements the Transport interface using subprocess communication.
 type Transport struct {
 	// Process management
-	cmd        *exec.Cmd
-	cliPath    string
-	options    *shared.Options
-	closeStdin bool
-	promptArg  *string // For one-shot queries, prompt passed as CLI argument
-	entrypoint string  // CLAUDE_CODE_ENTRYPOINT value (sdk-go or sdk-go-client)
+	cmd           *exec.Cmd
+	cliPath       string
+	options       *shared.Options
+	closeStdin    bool
+	promptArg     *string // For one-shot queries, prompt passed as CLI argument
+	entrypoint    string  // CLAUDE_CODE_ENTRYPOINT value (sdk-go or sdk-go-client)
+	processMu     sync.RWMutex
+	processDone   chan struct{}
+	processResult processResult
 
 	// Connection state
 	connected bool
@@ -57,8 +61,9 @@ type Transport struct {
 	validator *shared.StreamValidator
 
 	// Channels for communication
-	msgChan chan shared.Message
-	errChan chan error
+	msgChan     chan shared.Message
+	errChan     chan error
+	initFailure chan error
 
 	// Control protocol (for streaming mode only)
 	protocol        *control.Protocol
@@ -151,9 +156,24 @@ func (t *Transport) Connect(ctx context.Context) error {
 	// Check CLI version and warn if outdated (non-blocking)
 	t.emitCLIVersionWarning(ctx)
 
+	// Initialize all startup state before the process can emit output. This
+	// keeps fast child output from racing protocol construction.
+	t.ctx, t.cancel = context.WithCancel(ctx)
+	t.msgChan = make(chan shared.Message, channelBufferSize)
+	t.errChan = make(chan error, channelBufferSize)
+	t.initFailure = make(chan error, channelBufferSize)
+	t.parser.Reset()
+	t.validator = shared.NewStreamValidator()
+
 	// Set up I/O pipes
 	if err := t.setupIoPipes(); err != nil {
+		t.cleanup()
 		return err
+	}
+
+	if err := t.startControlProtocol(t.ctx); err != nil {
+		t.cleanup()
+		return fmt.Errorf("failed to start control protocol: %w", err)
 	}
 
 	// Start the process
@@ -164,13 +184,7 @@ func (t *Transport) Connect(ctx context.Context) error {
 			err,
 		)
 	}
-
-	// Set up context for goroutine management
-	t.ctx, t.cancel = context.WithCancel(ctx)
-
-	// Initialize channels
-	t.msgChan = make(chan shared.Message, channelBufferSize)
-	t.errChan = make(chan error, channelBufferSize)
+	t.startProcessWaiter()
 
 	// Start I/O handling goroutines
 	t.wg.Add(1)
@@ -186,18 +200,20 @@ func (t *Transport) Connect(ctx context.Context) error {
 	// The CLI still needs stdin to receive the message, even with --print flag
 	// stdin will be closed after sending the message in SendMessage()
 
-	// Set up control protocol for streaming mode only
-	if err := t.setupControlProtocol(t.ctx); err != nil {
-		return err
+	if err := t.initializeControlProtocol(t.ctx); err != nil {
+		cleanupErr := t.closeStartedProcess()
+		if cleanupErr != nil {
+			return fmt.Errorf("failed to initialize control protocol: %w (cleanup: %v)", err, cleanupErr)
+		}
+		return fmt.Errorf("failed to initialize control protocol: %w", err)
 	}
 
 	t.connected = true
 	return nil
 }
 
-// setupControlProtocol initializes control protocol for streaming mode.
-// Returns nil immediately for one-shot mode (closeStdin == true).
-func (t *Transport) setupControlProtocol(ctx context.Context) error {
+// startControlProtocol constructs the protocol before stdout processing begins.
+func (t *Transport) startControlProtocol(ctx context.Context) error {
 	if t.closeStdin {
 		return nil // One-shot mode doesn't need control protocol
 	}
@@ -206,19 +222,56 @@ func (t *Transport) setupControlProtocol(ctx context.Context) error {
 	t.protocol = control.NewProtocol(t.protocolAdapter, t.buildProtocolOptions()...)
 
 	if err := t.protocol.Start(ctx); err != nil {
-		t.cleanup()
-		return fmt.Errorf("failed to start control protocol: %w", err)
+		return err
 	}
-
-	// Perform handshake when hooks, permissions, checkpointing, or SDK MCP servers configured
-	if t.needsProtocolHandshake() {
-		if _, err := t.protocol.Initialize(ctx); err != nil {
-			t.cleanup()
-			return fmt.Errorf("failed to initialize control protocol: %w", err)
-		}
-	}
-
 	return nil
+}
+
+// initializeControlProtocol waits for one terminal startup outcome instead of
+// folding process exit, stdout EOF, parser failures, and cancellation into the
+// protocol's generic timeout.
+func (t *Transport) initializeControlProtocol(ctx context.Context) error {
+	if t.closeStdin || !t.needsProtocolHandshake() {
+		return nil
+	}
+
+	initCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := t.protocol.Initialize(initCtx)
+		resultCh <- err
+	}()
+
+	waitForInit := func(err error) error {
+		cancel()
+		<-resultCh
+		return err
+	}
+
+	select {
+	case err := <-resultCh:
+		return err
+	case err := <-t.initFailure:
+		if ctx.Err() != nil {
+			return waitForInit(ctx.Err())
+		}
+		if errors.Is(err, errStdoutEOFDuringInit) {
+			select {
+			case <-t.processDone:
+				return waitForInit(t.processExitBeforeControlResponseError())
+			case <-time.After(processExitArbitrationDelay):
+			}
+		}
+		return waitForInit(err)
+	case <-t.processDone:
+		if ctx.Err() != nil {
+			return waitForInit(ctx.Err())
+		}
+		return waitForInit(t.processExitBeforeControlResponseError())
+	case <-ctx.Done():
+		return waitForInit(ctx.Err())
+	}
 }
 
 // needsProtocolHandshake returns true if control protocol handshake is required.
@@ -321,19 +374,12 @@ func (t *Transport) Close() error {
 
 	t.connected = false
 
-	// Close control protocol first (before cancelling context)
+	// Close the protocol and stdin first so a cooperative child can exit.
 	if t.protocol != nil {
 		_ = t.protocol.Close()
-		t.protocol = nil
 	}
 	if t.protocolAdapter != nil {
 		_ = t.protocolAdapter.Close()
-		t.protocolAdapter = nil
-	}
-
-	// Cancel context to stop goroutines
-	if t.cancel != nil {
-		t.cancel()
 	}
 
 	// Close stdin if open
@@ -342,26 +388,14 @@ func (t *Transport) Close() error {
 		t.stdin = nil
 	}
 
-	// Wait for goroutines to finish with timeout
-	done := make(chan struct{})
-	go func() {
-		t.wg.Wait()
-		close(done)
-	}()
+	// Terminate and reap before releasing process resources. cmd.Wait() has one
+	// owner: the waiter created immediately after cmd.Start().
+	err := t.terminateProcess()
 
-	select {
-	case <-done:
-		// Goroutines finished gracefully
-	case <-time.After(terminationTimeoutSeconds * time.Second):
-		// Timeout: proceed with cleanup anyway
-		// Goroutines should terminate when process is killed
+	if t.cancel != nil {
+		t.cancel()
 	}
-
-	// Terminate process with 5-second timeout
-	var err error
-	if t.cmd != nil && t.cmd.Process != nil {
-		err = t.terminateProcess()
-	}
+	t.wg.Wait()
 
 	// Cleanup resources
 	t.cleanup()
