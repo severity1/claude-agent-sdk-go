@@ -28,7 +28,7 @@ subprocess/
 1. `Connect()`: Spawn CLI subprocess with configured arguments
 2. `SendMessage()`: Write JSON messages to stdin
 3. `handleStdout()`: Read stdout, parse JSON, route messages (io.go)
-4. Control messages: Route to `control.Protocol.HandleIncomingMessage()`
+4. Control messages: Route to `control.Protocol.HandleIncomingMessageAsync()` (incoming control requests run on their own goroutine so a slow callback cannot stall `handleStdout()`)
 5. `Close()`: SIGTERM -> wait 5s -> SIGKILL (process.go)
 
 <!-- END AUTO-MANAGED -->
