@@ -130,10 +130,15 @@ NewClient(opts...)
               │       ├─► parser.ProcessLine(line)
               │       ├─► Is control message?
               │       │       │
-              │       │       YES─► control.Protocol.HandleIncomingMessage()
+              │       │       YES─► control.Protocol.HandleIncomingMessageAsync()
               │       │       │         │
-              │       │       │         ├─► Match request ID
-              │       │       │         └─► Route to pending channel
+              │       │       │         ├─► control_response (inline)
+              │       │       │         │       ├─► Match request ID
+              │       │       │         │       └─► Route to pending channel
+              │       │       │         │
+              │       │       │         └─► control_request (own goroutine)
+              │       │       │                 ├─► Run hook / permission / MCP handler
+              │       │       │                 └─► Write control_response to stdin
               │       │       │
               │       │       NO──► Send to msgChan
               │       │
@@ -148,6 +153,12 @@ NewClient(opts...)
                       │
                       └─► Graceful shutdown sequence
 ```
+
+Incoming control requests are dispatched asynchronously: `HandleIncomingMessageAsync()`
+runs each `control_request` on its own goroutine so the reader never blocks on a user
+callback. A slow hook, permission check, or SDK MCP tool handler therefore cannot stall
+later messages on the same stream. Control responses and regular messages are still
+routed inline, in read order.
 
 ### WithClient Pattern
 
@@ -172,7 +183,9 @@ WithClient(ctx, fn, opts...)
 
 ## Control Protocol Flow
 
-Bidirectional communication for advanced features:
+Bidirectional communication for advanced features. Requests arriving from the CLI
+(permission checks, hooks, SDK MCP calls) each run on their own goroutine, so several
+can be in flight at once and the read loop keeps draining the stream while they work:
 
 ```
                         SDK                                   CLI

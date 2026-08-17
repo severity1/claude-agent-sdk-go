@@ -169,7 +169,7 @@ func (p *Protocol) readLoop() {
 			}
 
 			// Route the message
-			if err := p.HandleIncomingMessage(p.ctx, msg); err != nil {
+			if err := p.HandleIncomingMessageAsync(p.ctx, msg); err != nil {
 				fmt.Fprintf(os.Stderr, "claude-agent-sdk: failed to route control message: %v\n", err)
 				continue
 			}
@@ -262,6 +262,8 @@ func (p *Protocol) HandleControlInitErr(err error) {
 
 // HandleIncomingMessage routes incoming messages based on their type.
 // Control messages are handled internally, regular messages are forwarded to the stream.
+// Incoming control requests are handled synchronously; callers draining the CLI
+// stream should use HandleIncomingMessageAsync instead.
 func (p *Protocol) HandleIncomingMessage(ctx context.Context, msg map[string]any) error {
 	msgType, ok := msg["type"].(string)
 	if !ok {
@@ -279,6 +281,37 @@ func (p *Protocol) HandleIncomingMessage(ctx context.Context, msg map[string]any
 		// Regular SDK message - forward to stream
 		return p.forwardToStream(ctx, msg)
 	}
+}
+
+// HandleIncomingMessageAsync routes incoming messages like HandleIncomingMessage,
+// except that control requests from the CLI are dispatched on their own goroutine.
+// Read loops must use this so a slow user callback (MCP tool handler, hook, or
+// permission check) cannot stall processing of later messages on the same stream.
+func (p *Protocol) HandleIncomingMessageAsync(ctx context.Context, msg map[string]any) error {
+	if msgType, _ := msg["type"].(string); msgType != MessageTypeControlRequest {
+		return p.HandleIncomingMessage(ctx, msg)
+	}
+
+	// Deliberately not tracked by p.wg: Close must not block on a user callback
+	// that ignores ctx.
+	go func() {
+		requestID, _ := msg["request_id"].(string)
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "claude-agent-sdk: control request handler panicked: %v\n", r)
+				// Best-effort: answer the CLI so its pending request does not hang forever.
+				if requestID != "" {
+					_ = p.sendErrorResponse(ctx, requestID, fmt.Sprintf("control request handler panicked: %v", r))
+				}
+			}
+		}()
+
+		if err := p.handleIncomingControlRequest(ctx, msg); err != nil {
+			fmt.Fprintf(os.Stderr, "claude-agent-sdk: failed to handle control request: %v\n", err)
+		}
+	}()
+
+	return nil
 }
 
 // handleIncomingControlRequest routes incoming control requests from CLI.
