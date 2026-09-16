@@ -1107,10 +1107,12 @@ Assistant response message with content blocks.
 
 ```go
 type AssistantMessage struct {
-    MessageType string
-    Content     []ContentBlock
-    Model       string
-    Error       *AssistantMessageError
+    MessageType     string
+    Content         []ContentBlock
+    Model           string
+    Error           *AssistantMessageError
+    ParentToolUseID *string
+    Usage           *map[string]any
 }
 ```
 
