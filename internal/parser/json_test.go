@@ -129,6 +129,62 @@ func TestParseValidMessages(t *testing.T) { //nolint:gocyclo
 				if am.ParentToolUseID != nil {
 					t.Errorf("expected ParentToolUseID nil, got %v", am.ParentToolUseID)
 				}
+				if am.Usage != nil {
+					t.Errorf("expected Usage nil when absent, got %v", am.Usage)
+				}
+			},
+		},
+		{
+			name: "assistant_message_with_usage",
+			data: map[string]any{
+				"type": "assistant",
+				"message": map[string]any{
+					"content": []any{map[string]any{"type": "text", "text": "Hi"}},
+					"model":   "claude-3-sonnet",
+					"usage": map[string]any{
+						"input_tokens":                float64(2),
+						"output_tokens":               float64(4),
+						"cache_creation_input_tokens": float64(8778),
+						"cache_read_input_tokens":     float64(9693),
+					},
+				},
+			},
+			expectedType: shared.MessageTypeAssistant,
+			validate: func(t *testing.T, msg shared.Message) {
+				t.Helper()
+				am := msg.(*shared.AssistantMessage)
+				if am.Usage == nil {
+					t.Fatal("expected Usage to be set")
+				}
+				usage := *am.Usage
+				if usage["input_tokens"] != float64(2) {
+					t.Errorf("expected input_tokens 2, got %v", usage["input_tokens"])
+				}
+				if usage["cache_read_input_tokens"] != float64(9693) {
+					t.Errorf("expected cache_read_input_tokens 9693, got %v", usage["cache_read_input_tokens"])
+				}
+			},
+		},
+		{
+			// Regression guard: usage lives nested under "message", not at the
+			// top level of the event (unlike ResultMessage). A top-level usage
+			// key must NOT populate the field.
+			name: "assistant_message_with_top_level_usage_ignored",
+			data: map[string]any{
+				"type":  "assistant",
+				"usage": map[string]any{"input_tokens": float64(999)},
+				"message": map[string]any{
+					"content": []any{map[string]any{"type": "text", "text": "Hi"}},
+					"model":   "claude-3-sonnet",
+				},
+			},
+			expectedType: shared.MessageTypeAssistant,
+			validate: func(t *testing.T, msg shared.Message) {
+				t.Helper()
+				am := msg.(*shared.AssistantMessage)
+				if am.Usage != nil {
+					t.Errorf("expected Usage nil when only top-level usage present, got %v", am.Usage)
+				}
 			},
 		},
 		{

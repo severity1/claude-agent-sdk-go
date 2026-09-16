@@ -116,10 +116,12 @@ func (m *UserMessage) Type() string { return "user" }
 
 // AssistantMessage represents Claude's response.
 type AssistantMessage struct {
-    MessageType string                 `json:"type"`    // Always "assistant"
-    Content     []ContentBlock         `json:"content"` // Text, thinking, tool use blocks
-    Model       string                 `json:"model"`   // Model used for response
-    Error       *AssistantMessageError `json:"error,omitempty"`
+    MessageType     string                 `json:"type"`    // Always "assistant"
+    Content         []ContentBlock         `json:"content"` // Text, thinking, tool use blocks
+    Model           string                 `json:"model"`   // Model used for response
+    Error           *AssistantMessageError `json:"error,omitempty"`
+    ParentToolUseID *string                `json:"parent_tool_use_id,omitempty"` // Set when produced inside a subagent
+    Usage           *map[string]any        `json:"usage,omitempty"`              // Per-API-call token usage, not a turn total
 }
 
 func (m *AssistantMessage) Type() string { return "assistant" }

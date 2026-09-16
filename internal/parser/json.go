@@ -259,11 +259,19 @@ func (p *Parser) parseAssistantMessage(data map[string]any) (*shared.AssistantMe
 		parentToolUseID = &ptid
 	}
 
+	// usage is nested under the message object (unlike ResultMessage, where it
+	// is top-level): {"type":"assistant","message":{...,"usage":{...}}}.
+	var usage *map[string]any
+	if u, ok := messageData["usage"].(map[string]any); ok {
+		usage = &u
+	}
+
 	return &shared.AssistantMessage{
 		Content:         blocks,
 		Model:           model,
 		Error:           errorPtr,
 		ParentToolUseID: parentToolUseID,
+		Usage:           usage,
 	}, nil
 }
 

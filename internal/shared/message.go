@@ -114,6 +114,14 @@ type AssistantMessage struct {
 	Model           string                 `json:"model"`
 	Error           *AssistantMessageError `json:"error,omitempty"`
 	ParentToolUseID *string                `json:"parent_tool_use_id,omitempty"`
+	// Usage carries the token usage for this single API round-trip (input_tokens,
+	// output_tokens, cache_creation_input_tokens, cache_read_input_tokens, ...),
+	// not a running or turn-level total. The CLI does not currently expose a
+	// message ID on this event, and a single API response can be split across
+	// multiple AssistantMessage events that report identical Usage - so summing
+	// Usage across consecutive AssistantMessages double-counts. Nil when the CLI
+	// omits the field (e.g. synthetic messages).
+	Usage *map[string]any `json:"usage,omitempty"`
 }
 
 // Type returns the message type for AssistantMessage.
