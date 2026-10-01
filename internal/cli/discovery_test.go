@@ -145,11 +145,11 @@ func TestCwdNotAddedToCommand(t *testing.T) {
 func TestEffortFlagSupport(t *testing.T) {
 	effort := "high"
 	options := &shared.Options{Effort: &effort}
-	cmd := BuildCommand("/usr/local/bin/claude", options, false)
+	cmd := BuildCommand("/usr/local/bin/claude", options)
 	assertContainsArgs(t, cmd, "--effort", "high")
 
 	// When Effort is unset, no --effort flag should be emitted.
-	cmd = BuildCommand("/usr/local/bin/claude", &shared.Options{}, false)
+	cmd = BuildCommand("/usr/local/bin/claude", &shared.Options{})
 	assertNotContainsArg(t, cmd, "--effort")
 }
 
