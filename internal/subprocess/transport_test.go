@@ -513,8 +513,11 @@ func TestEndInputClosesStdinWriteOnly(t *testing.T) {
 	transport.mu.RLock()
 	stdinAfter := transport.stdin
 	transport.mu.RUnlock()
-	if stdinAfter != nil {
-		t.Error("Expected transport.stdin to be nil after EndInput")
+	if stdinAfter == nil || !stdinAfter.isClosed() {
+		t.Error("Expected transport.stdin to be closed after EndInput")
+	}
+	if err := transport.SendMessage(ctx, shared.StreamMessage{Type: "user"}); err == nil {
+		t.Error("Expected SendMessage to fail after EndInput")
 	}
 
 	// Idempotent: calling EndInput again must not error.

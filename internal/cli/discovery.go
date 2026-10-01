@@ -395,10 +395,14 @@ func addOutputFormatFlags(cmd []string, options *shared.Options) []string {
 
 func addExtraFlags(cmd []string, options *shared.Options) []string {
 	for flag, value := range options.ExtraArgs {
-		if value == nil {
+		switch {
+		case value == nil:
 			// Boolean flag
 			cmd = append(cmd, "--"+flag)
-		} else {
+		case strings.HasPrefix(*value, "-"):
+			// A separate dash-leading value would parse as its own flag (Python #1127).
+			cmd = append(cmd, "--"+flag+"="+*value)
+		default:
 			// Flag with value
 			cmd = append(cmd, "--"+flag, *value)
 		}

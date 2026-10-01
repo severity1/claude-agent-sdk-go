@@ -40,6 +40,8 @@ func TestMain(m *testing.M) {
 // the subprocess package so unrelated tests can't accidentally trigger them.
 const (
 	envMockMode = "CLAUDE_SDK_TEST_MOCK_MODE"
+	// envMockEventLog names a file where shutdown modes append "NAME <unix-ms>" lines.
+	envMockEventLog = "CLAUDE_SDK_TEST_MOCK_EVENT_LOG"
 )
 
 // Mock modes. Order matches the TransportMockOption constructors above so the
@@ -61,6 +63,16 @@ const (
 	mockModeTwoPermissionReqs   = "two_permission_requests"
 	mockModeExitNonZero         = "exit_nonzero"
 	mockModeErrorResultExit     = "error_result_exit"
+	mockModeIgnoreSIGTERM       = "ignore_sigterm"
+	mockModeSlowExitAfterEOF    = "slow_exit_after_eof"
+	mockModeStopReading         = "stop_reading"
+)
+
+// Event names written to the mock event log.
+const (
+	mockEventEOF     = "EOF"
+	mockEventSIGTERM = "SIGTERM"
+	mockEventExit    = "EXIT"
 )
 
 // runMockCLI dispatches to per-mode handlers. Kept thin so gocyclo stays low.
@@ -113,8 +125,7 @@ func runMockCLI(mode string) {
 		fmt.Println(`{"type":"result","subtype":"error_max_turns","duration_ms":1,"duration_api_ms":1,"is_error":true,"num_turns":1,"session_id":"s","total_cost_usd":0,"errors":["max turns reached"]}`)
 		os.Exit(1)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown mock CLI mode: %s\n", mode)
-		os.Exit(2)
+		runShutdownMock(mode)
 	}
 	os.Exit(0)
 }
@@ -308,6 +319,73 @@ func runMockTwoPermissionRequests() {
 		)
 	}
 	controlEchoLoop(os.Stdin, os.Stdout)
+}
+
+// slowExitDelay is how long slow_exit_after_eof keeps running after stdin EOF.
+const slowExitDelay = 1500 * time.Millisecond
+
+// runShutdownMock runs the shutdown modes and exits 2 for an unknown mode.
+// Split from runMockCLI to keep its complexity flat.
+func runShutdownMock(mode string) {
+	switch mode {
+	case mockModeIgnoreSIGTERM:
+		runMockIgnoreSIGTERM()
+	case mockModeSlowExitAfterEOF:
+		runMockSlowExitAfterEOF()
+	case mockModeStopReading:
+		answerInitialize()
+		// Never read stdin again, so the SDK's stdin writes block once the pipe is full.
+		time.Sleep(2 * time.Minute)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown mock CLI mode: %s\n", mode)
+		os.Exit(2)
+	}
+}
+
+// runMockIgnoreSIGTERM logs and ignores SIGTERM, so only SIGKILL ends it.
+func runMockIgnoreSIGTERM() {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM)
+	go func() {
+		for range sigChan {
+			logMockEvent(mockEventSIGTERM)
+		}
+	}()
+	controlEchoLoop(os.Stdin, os.Stdout)
+	logMockEvent(mockEventEOF)
+	time.Sleep(time.Minute)
+}
+
+// runMockSlowExitAfterEOF writes output and keeps running for a while after
+// stdin EOF, like a CLI that saves its session before it exits. SIGTERM is
+// logged and ends the process with a non-zero code.
+func runMockSlowExitAfterEOF() {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		logMockEvent(mockEventSIGTERM)
+		os.Exit(143)
+	}()
+	controlEchoLoop(os.Stdin, os.Stdout)
+	logMockEvent(mockEventEOF)
+	fmt.Println(assistantMsg)
+	time.Sleep(slowExitDelay)
+	logMockEvent(mockEventExit)
+}
+
+// logMockEvent appends "name <unix-ms>" to the event log file, if one is set.
+func logMockEvent(name string) {
+	path := os.Getenv(envMockEventLog)
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // path is constructed from test temp dir
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(f, "%s %d\n", name, time.Now().UnixNano()/int64(time.Millisecond))
+	_ = f.Close()
 }
 
 // mockCrashExitCode is the exit code of the exit_nonzero mode.

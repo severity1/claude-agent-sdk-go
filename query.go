@@ -81,6 +81,7 @@ type queryIterator struct {
 	mu                 sync.Mutex
 	closed             bool
 	closeOnce          sync.Once
+	done               chan struct{} // closed by Close; ends the ctx watcher
 	endInputAfterFirst bool
 	endInputOnce       sync.Once
 }
@@ -159,7 +160,11 @@ func (qi *queryIterator) Close() error {
 	qi.closeOnce.Do(func() {
 		qi.mu.Lock()
 		qi.closed = true
+		done := qi.done
 		qi.mu.Unlock()
+		if done != nil {
+			close(done)
+		}
 		if qi.transport != nil {
 			err = qi.transport.Close()
 		}
@@ -173,6 +178,7 @@ func (qi *queryIterator) start() error {
 	if err := qi.transport.Connect(qi.ctx); err != nil {
 		return fmt.Errorf("failed to connect transport: %w", err)
 	}
+	qi.watchContext()
 
 	msgChan, errChan := qi.transport.ReceiveMessages(qi.ctx)
 	qi.msgChan = msgChan
@@ -201,6 +207,20 @@ func (qi *queryIterator) start() error {
 	}
 
 	return nil
+}
+
+// watchContext closes the iterator when its ctx ends, because the transport
+// no longer stops the CLI on the Connect ctx. Caller holds qi.mu.
+func (qi *queryIterator) watchContext() {
+	done := make(chan struct{})
+	qi.done = done
+	go func() {
+		select {
+		case <-qi.ctx.Done():
+			_ = qi.Close()
+		case <-done:
+		}
+	}()
 }
 
 // needsBidirectionalStdin reports whether stdin must stay open for control

@@ -42,16 +42,15 @@ func (pa *ProtocolAdapter) Write(ctx context.Context, data []byte) error {
 	}
 
 	pa.mu.Lock()
-	defer pa.mu.Unlock()
+	closed := pa.closed
+	pa.mu.Unlock()
 
-	if pa.closed {
+	if closed || pa.stdin == nil {
 		return io.ErrClosedPipe
 	}
 
-	if pa.stdin == nil {
-		return io.ErrClosedPipe
-	}
-
+	// Written outside pa.mu so Close never waits for a blocked write; the
+	// stdin writer serializes writes.
 	_, err := pa.stdin.Write(data)
 	return err
 }

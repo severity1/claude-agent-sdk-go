@@ -264,7 +264,9 @@ func validateWindowsArgValue(goos, name, value string) error {
 		name, value, strings.Join(bad, " "))
 }
 
-// Connect establishes a connection to the Claude Code CLI.
+// Connect establishes a connection to the Claude Code CLI. ctx bounds only
+// the connection setup (like net.Dialer.DialContext): once Connect returns,
+// the session lives until Disconnect, even after ctx is cancelled.
 func (c *ClientImpl) Connect(ctx context.Context, _ ...StreamMessage) error {
 	// Check context before acquiring lock
 	if ctx.Err() != nil {

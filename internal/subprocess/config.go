@@ -81,63 +81,39 @@ func (t *Transport) GetValidator() *shared.StreamValidator {
 
 // SetModel changes the AI model during an active session.
 func (t *Transport) SetModel(ctx context.Context, model *string) error {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	if !t.connected {
-		return fmt.Errorf("transport not connected")
+	protocol, err := t.connectedProtocol()
+	if err != nil {
+		return err
 	}
-	if t.protocol == nil {
-		return fmt.Errorf("internal error: transport connected but control protocol is nil")
-	}
-
-	return t.protocol.SetModel(ctx, model)
+	return protocol.SetModel(ctx, model)
 }
 
 // SetPermissionMode changes the permission mode during an active session.
 func (t *Transport) SetPermissionMode(ctx context.Context, mode shared.PermissionMode) error {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	if !t.connected {
-		return fmt.Errorf("transport not connected")
+	protocol, err := t.connectedProtocol()
+	if err != nil {
+		return err
 	}
-	if t.protocol == nil {
-		return fmt.Errorf("internal error: transport connected but control protocol is nil")
-	}
-
-	return t.protocol.SetPermissionMode(ctx, string(mode))
+	return protocol.SetPermissionMode(ctx, string(mode))
 }
 
 // RewindFiles reverts tracked files to their state at a specific user message.
 // Requires file checkpointing to have been enabled when creating the client.
 func (t *Transport) RewindFiles(ctx context.Context, userMessageID string) error {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	if !t.connected {
-		return fmt.Errorf("transport not connected")
+	protocol, err := t.connectedProtocol()
+	if err != nil {
+		return err
 	}
-	if t.protocol == nil {
-		return fmt.Errorf("internal error: transport connected but control protocol is nil")
-	}
-
-	return t.protocol.RewindFiles(ctx, userMessageID)
+	return protocol.RewindFiles(ctx, userMessageID)
 }
 
 // GetMcpStatus returns the connection status of all configured MCP servers.
 func (t *Transport) GetMcpStatus(ctx context.Context) (*control.McpStatusResponse, error) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	if !t.connected {
-		return nil, fmt.Errorf("transport not connected")
+	protocol, err := t.connectedProtocol()
+	if err != nil {
+		return nil, err
 	}
-	if t.protocol == nil {
-		return nil, fmt.Errorf("internal error: transport connected but control protocol is nil")
-	}
-
-	return t.protocol.GetMcpStatus(ctx)
+	return protocol.GetMcpStatus(ctx)
 }
 
 // buildProtocolOptions constructs control protocol options from transport configuration.

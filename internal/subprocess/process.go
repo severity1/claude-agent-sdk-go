@@ -35,41 +35,46 @@ func (t *Transport) startProcessWaiter() {
 	}()
 }
 
-// terminateProcess implements the 5-second SIGTERM -> SIGKILL sequence.
-// It never calls cmd.Wait; startProcessWaiter owns that call.
+// terminateProcess runs after stdin is closed (Python close()): wait 5s for
+// a clean exit, SIGTERM, wait 5s, SIGKILL, wait 5s. It uses fixed timers and
+// no ctx, so a cancelled caller still gets every step. It never calls
+// cmd.Wait; startProcessWaiter owns that call. On Windows SIGTERM fails and
+// the sequence goes to Kill (Python: terminate() is TerminateProcess there).
 func (t *Transport) terminateProcess() error {
 	if t.cmd == nil || t.cmd.Process == nil || t.processDone == nil {
 		return nil
 	}
 
-	// Already exited and reaped. stdout EOF alone is not proof of exit.
-	select {
-	case <-t.processDone:
+	// stdout EOF alone is not proof of exit; only processDone is.
+	if t.waitProcessDone(terminationTimeoutSeconds * time.Second) {
 		return nil
-	default:
 	}
 
-	if err := t.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		if !isProcessAlreadyFinishedError(err) {
-			if killErr := t.cmd.Process.Kill(); killErr != nil && !isProcessAlreadyFinishedError(killErr) {
-				return killErr
-			}
+	err := t.cmd.Process.Signal(syscall.SIGTERM)
+	if err == nil || isProcessAlreadyFinishedError(err) {
+		if t.waitProcessDone(terminationTimeoutSeconds * time.Second) {
+			return nil
 		}
-		<-t.processDone
-		return nil
 	}
 
-	select {
-	case <-t.processDone:
-		return nil
-	case <-time.After(terminationTimeoutSeconds * time.Second):
-	case <-t.ctx.Done():
-	}
 	if killErr := t.cmd.Process.Kill(); killErr != nil && !isProcessAlreadyFinishedError(killErr) {
 		return killErr
 	}
-	<-t.processDone
+	// Bounded: startProcessWaiter still reaps the process if this times out.
+	t.waitProcessDone(terminationTimeoutSeconds * time.Second)
 	return nil
+}
+
+// waitProcessDone waits up to d for the process to exit and reports whether it did.
+func (t *Transport) waitProcessDone(d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-t.processDone:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 // cleanup cleans up all resources

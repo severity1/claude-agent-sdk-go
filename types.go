@@ -131,6 +131,8 @@ const (
 // Transport abstracts the communication layer with Claude Code CLI.
 // This interface stays in main package because it's used by client code.
 type Transport interface {
+	// Connect starts the CLI. ctx bounds only the connect step; the CLI
+	// runs until Close.
 	Connect(ctx context.Context) error
 	SendMessage(ctx context.Context, message StreamMessage) error
 	// EndInput signals end-of-input by closing the write side of the

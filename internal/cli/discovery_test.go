@@ -187,6 +187,16 @@ func TestExtraArgsSupport(t *testing.T) {
 			extraArgs: map[string]*string{"log-level": &[]string{"info"}[0]},
 			validate:  validateValueExtraArgs,
 		},
+		{
+			name:      "dash_leading_value_uses_equals_form",
+			extraArgs: map[string]*string{"debug": &[]string{"--version"}[0]},
+			validate:  validateDashValueExtraArgs,
+		},
+		{
+			name:      "single_dash_value_uses_equals_form",
+			extraArgs: map[string]*string{"log-file": &[]string{"-"}[0]},
+			validate:  validateSingleDashExtraArgs,
+		},
 	}
 
 	for _, test := range tests {
@@ -437,6 +447,19 @@ func validateBooleanExtraArgs(t *testing.T, cmd []string) {
 func validateValueExtraArgs(t *testing.T, cmd []string) {
 	t.Helper()
 	assertContainsArgs(t, cmd, "--log-level", "info")
+}
+
+func validateDashValueExtraArgs(t *testing.T, cmd []string) {
+	t.Helper()
+	assertContainsArg(t, cmd, "--debug=--version")
+	assertNotContainsArg(t, cmd, "--version")
+	assertNotContainsArg(t, cmd, "--debug")
+}
+
+func validateSingleDashExtraArgs(t *testing.T, cmd []string) {
+	t.Helper()
+	assertContainsArg(t, cmd, "--log-file=-")
+	assertNotContainsArg(t, cmd, "-")
 }
 
 func validateSingleBetaFlag(t *testing.T, cmd []string) {

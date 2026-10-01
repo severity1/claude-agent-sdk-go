@@ -68,6 +68,37 @@ func TestQueryCanUseToolRoutesPermissionPrompts(t *testing.T) {
 	}
 }
 
+// TestQueryContextCancelClosesTransport verifies that cancelling the Query
+// ctx closes the transport even when the caller stops calling Next, so the
+// CLI process does not outlive the query (Python: query() closes in finally).
+func TestQueryContextCancelClosesTransport(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	transport := newQueryMockTransport(
+		WithQueryAssistantResponse("first"),
+		WithQueryAssistantResponse("second"),
+	)
+	iter, err := QueryWithTransport(ctx, "Hi", transport)
+	if err != nil {
+		t.Fatalf("QueryWithTransport() error = %v", err)
+		return
+	}
+	if _, err := iter.Next(ctx); err != nil {
+		t.Fatalf("Next() error = %v", err)
+		return
+	}
+
+	cancel()
+	deadline := time.Now().Add(2 * time.Second)
+	for transport.getCloseCalls() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := transport.getCloseCalls(); got != 1 {
+		t.Fatalf("transport Close calls = %d after ctx cancel, want 1", got)
+	}
+}
+
 // TestQueryClosesTransportAtStreamEnd verifies the iterator closes the
 // transport on every terminal path, so a caller that drains it without Close
 // leaks no process or temp file (Issue #145).

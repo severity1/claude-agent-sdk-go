@@ -100,7 +100,7 @@ All blocking operations accept `context.Context` as the first parameter for canc
 
 ### Graceful Shutdown
 
-Process termination follows: SIGTERM -> 5 second wait -> SIGKILL, ensuring clean resource cleanup.
+`Close()` follows the Python sequence: close stdin -> wait up to 5 seconds for a clean exit -> SIGTERM -> wait up to 5 seconds -> SIGKILL. A CLI that exits on stdin EOF (the normal case) ends without a signal. The `Connect` context bounds only the connect step; the CLI runs until `Close()`.
 
 ## Package Structure
 

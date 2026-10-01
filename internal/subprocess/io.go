@@ -25,6 +25,7 @@ type childProcess struct {
 // exitError waits for the CLI to exit after stdout EOF. It returns a
 // ProcessError for a non-zero exit, and nil for a clean exit or when the SDK
 // itself shut the CLI down (Python: ProcessError after read_messages ends).
+// The caller drops the error when the SDK is closing the CLI.
 func (c childProcess) exitError(ctx context.Context, lastErrorResult string) error {
 	if c.cmd == nil || c.done == nil {
 		return nil
@@ -34,7 +35,6 @@ func (c childProcess) exitError(ctx context.Context, lastErrorResult string) err
 	case <-ctx.Done():
 		return nil
 	}
-	// teardown cancels ctx before it signals the CLI, so a set ctx means our kill.
 	if ctx.Err() != nil || c.cmd.ProcessState == nil || c.cmd.ProcessState.Success() {
 		return nil
 	}
@@ -94,7 +94,8 @@ func (t *Transport) handleStdout(protocol *control.Protocol, child childProcess)
 		t.sendStreamError(fmt.Errorf("stdout scanner error: %w", err))
 		return
 	}
-	if err := child.exitError(t.ctx, lastErrorResult); err != nil {
+	// A signal from our own teardown is not a CLI failure.
+	if err := child.exitError(t.ctx, lastErrorResult); err != nil && !t.isClosing() {
 		t.sendStreamError(err)
 	}
 }
@@ -121,7 +122,7 @@ func (t *Transport) processStdoutLine(protocol *control.Protocol, line string, l
 		routeInitError(protocol, msg)
 
 		if rawCtrl, ok := msg.(*shared.RawControlMessage); ok {
-			if protocol != nil {
+			if protocol != nil && !t.isClosing() {
 				// Control requests run on their own goroutine so a slow callback
 				// cannot stall this reader; responses route inline.
 				_ = protocol.HandleIncomingMessageAsync(t.ctx, rawCtrl.Data)
@@ -134,6 +135,8 @@ func (t *Transport) processStdoutLine(protocol *control.Protocol, line string, l
 
 		select {
 		case t.msgChan <- msg:
+		case <-t.closing:
+			// Close is in progress and nobody reads; keep draining stdout.
 		case <-t.ctx.Done():
 			return false
 		}
@@ -161,13 +164,25 @@ func trackErrorResult(current string, msg shared.Message) string {
 	return ""
 }
 
-// sendStreamError delivers err to errChan. It returns false when the
-// transport context is done.
+// sendStreamError delivers err to errChan, or drops it while Close runs. It
+// returns false when the transport context is done.
 func (t *Transport) sendStreamError(err error) bool {
 	select {
 	case t.errChan <- err:
 		return true
+	case <-t.closing:
+		return true
 	case <-t.ctx.Done():
+		return false
+	}
+}
+
+// isClosing reports whether teardown started.
+func (t *Transport) isClosing() bool {
+	select {
+	case <-t.closing:
+		return true
+	default:
 		return false
 	}
 }
@@ -280,11 +295,11 @@ func (t *Transport) closeChildPipeEnds() {
 // Stdin is always opened so the SDK can write the initialize handshake and
 // subsequent user messages. Stderr is configured via setupStderr.
 func (t *Transport) setupIoPipes() error {
-	var err error
-	t.stdin, err = t.cmd.StdinPipe()
+	stdinPipe, err := t.cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
+	t.stdin = newStdinWriter(stdinPipe)
 
 	t.stdout, err = t.newChildOutputPipe(&t.cmd.Stdout)
 	if err != nil {

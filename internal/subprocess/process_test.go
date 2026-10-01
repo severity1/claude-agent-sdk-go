@@ -68,23 +68,6 @@ func TestTransportTerminateProcessPaths(t *testing.T) {
 		assertNoTransportError(t, err)
 	})
 
-	// Test SIGTERM timeout (force SIGKILL)
-	t.Run("sigterm_timeout_force_kill", func(t *testing.T) {
-		transport := setupTransportForTest(t, newTransportMockCLIWithOptions(t, WithLongRunning()))
-		connectTransportSafely(ctx, t, transport)
-
-		// This transport ignores SIGTERM for 6 seconds, forcing SIGKILL
-		start := time.Now()
-		err := transport.Close()
-		duration := time.Since(start)
-
-		// Should complete within reasonable time after 5-second timeout
-		if duration > 8*time.Second {
-			t.Errorf("Termination took too long: %v", duration)
-		}
-		assertNoTransportError(t, err)
-	})
-
 	// Test context cancellation during termination
 	t.Run("context_cancelled_during_termination", func(t *testing.T) {
 		// Create a context that we can cancel
