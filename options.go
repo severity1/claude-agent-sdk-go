@@ -670,6 +670,8 @@ var NewPermissionResultDeny = control.NewPermissionResultDeny
 //
 // The callback must be thread-safe as it may be invoked concurrently.
 // If no callback is set, all tool requests are denied (secure default).
+// Query and Client.Connect set PermissionPromptToolName to "stdio" so the CLI
+// asks this callback; combining it with another tool name is an error.
 func WithCanUseTool(callback CanUseToolCallback) Option {
 	return func(o *Options) {
 		// Handle nil callback explicitly

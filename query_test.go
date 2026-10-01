@@ -16,6 +16,57 @@ type contextKey string
 
 const cancelKey contextKey = "cancel"
 
+// TestQueryCanUseToolRoutesPermissionPrompts verifies Query applies the same
+// CanUseTool configuration as Client.Connect (Issue #146). Without
+// --permission-prompt-tool stdio the CLI never asks the callback.
+func TestQueryCanUseToolRoutesPermissionPrompts(t *testing.T) {
+	callback := func(_ context.Context, _ string, _ map[string]any, _ ToolPermissionContext) (PermissionResult, error) {
+		return NewPermissionResultAllow(), nil
+	}
+	tests := []struct {
+		name        string
+		opts        []Option
+		wantErr     string
+		wantToolPtr bool
+	}{
+		{name: "callback_sets_stdio", opts: []Option{WithCanUseTool(callback)}, wantToolPtr: true},
+		{name: "explicit_stdio_allowed", opts: []Option{WithCanUseTool(callback), WithPermissionPromptToolName("stdio")}, wantToolPtr: true},
+		{name: "other_tool_rejected", opts: []Option{WithCanUseTool(callback), WithPermissionPromptToolName("mcp__perm__ask")}, wantErr: "cannot be used with PermissionPromptToolName"},
+		{name: "no_callback_unchanged", opts: nil, wantToolPtr: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := setupQueryTestContext(t, 5*time.Second)
+			defer cancel()
+
+			iter, err := QueryWithTransport(ctx, "Hi", newQueryMockTransport(), test.opts...)
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("QueryWithTransport() error = %v, want substring %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("QueryWithTransport() error = %v", err)
+				return
+			}
+			defer func() { _ = iter.Close() }()
+
+			toolName := iter.(*queryIterator).options.PermissionPromptToolName
+			if !test.wantToolPtr {
+				if toolName != nil {
+					t.Fatalf("PermissionPromptToolName = %q, want nil", *toolName)
+				}
+				return
+			}
+			if toolName == nil || *toolName != "stdio" {
+				t.Fatalf("PermissionPromptToolName = %v, want \"stdio\"", toolName)
+			}
+		})
+	}
+}
+
 // TestQueryBasicExecution tests simple query functionality.
 func TestQueryBasicExecution(t *testing.T) {
 	ctx, cancel := setupQueryTestContext(t, 10*time.Second)

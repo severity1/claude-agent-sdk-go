@@ -181,41 +181,49 @@ func WithClientTransport(ctx context.Context, transport Transport, fn func(Clien
 	return fn(client)
 }
 
-// prepareOptions applies defaults and validates the client configuration options.
-func (c *ClientImpl) prepareOptions() error {
-	if c.options == nil {
+// permissionPromptToolStdio routes permission prompts over the control protocol.
+const permissionPromptToolStdio = "stdio"
+
+// prepareOptions applies defaults and validates options. Query and
+// Client.Connect both call it, as Python's _configure_can_use_tool runs for
+// query() and connect().
+func prepareOptions(options *Options) error {
+	if options == nil {
 		return nil // Nil options are acceptable (use defaults)
 	}
 
-	// Auto-configure PermissionPromptToolName when CanUseTool callback is set.
-	// This tells CLI to route permission prompts through stdio (control protocol).
-	if c.options.CanUseTool != nil && c.options.PermissionPromptToolName == nil {
-		stdio := "stdio"
-		c.options.PermissionPromptToolName = &stdio
+	// CanUseTool only fires when the CLI routes permission prompts over stdio.
+	if options.CanUseTool != nil {
+		toolName := options.PermissionPromptToolName
+		if toolName != nil && *toolName != permissionPromptToolStdio {
+			return fmt.Errorf("CanUseTool callback cannot be used with PermissionPromptToolName %q: use one or the other", *toolName)
+		}
+		stdio := permissionPromptToolStdio
+		options.PermissionPromptToolName = &stdio
 	}
 
 	// Validate working directory
-	if c.options.Cwd != nil {
-		if _, err := os.Stat(*c.options.Cwd); os.IsNotExist(err) {
-			return fmt.Errorf("working directory does not exist: %s", *c.options.Cwd)
+	if options.Cwd != nil {
+		if _, err := os.Stat(*options.Cwd); os.IsNotExist(err) {
+			return fmt.Errorf("working directory does not exist: %s", *options.Cwd)
 		}
 	}
 
 	// Validate max turns
-	if c.options.MaxTurns < 0 {
-		return fmt.Errorf("max_turns must be non-negative, got: %d", c.options.MaxTurns)
+	if options.MaxTurns < 0 {
+		return fmt.Errorf("max_turns must be non-negative, got: %d", options.MaxTurns)
 	}
 
 	// Validate permission mode
-	if c.options.PermissionMode != nil {
+	if options.PermissionMode != nil {
 		validModes := map[PermissionMode]bool{
 			PermissionModeDefault:           true,
 			PermissionModeAcceptEdits:       true,
 			PermissionModePlan:              true,
 			PermissionModeBypassPermissions: true,
 		}
-		if !validModes[*c.options.PermissionMode] {
-			return fmt.Errorf("invalid permission mode: %s", string(*c.options.PermissionMode))
+		if !validModes[*options.PermissionMode] {
+			return fmt.Errorf("invalid permission mode: %s", string(*options.PermissionMode))
 		}
 	}
 
@@ -238,7 +246,7 @@ func (c *ClientImpl) Connect(ctx context.Context, _ ...StreamMessage) error {
 	}
 
 	// Validate configuration before connecting
-	if err := c.prepareOptions(); err != nil {
+	if err := prepareOptions(c.options); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 

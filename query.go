@@ -18,6 +18,9 @@ var ErrNoMoreMessages = errors.New("no more messages")
 // handshake.
 func Query(ctx context.Context, prompt string, opts ...Option) (MessageIterator, error) {
 	options := NewOptions(opts...)
+	if err := prepareOptions(options); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
 
 	transport, err := createQueryTransport(options)
 	if err != nil {
@@ -40,6 +43,9 @@ func QueryWithTransport(
 	}
 
 	options := NewOptions(opts...)
+	if err := prepareOptions(options); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
 	return queryWithTransportAndOptions(ctx, prompt, transport, options)
 }
 

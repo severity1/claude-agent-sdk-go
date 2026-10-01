@@ -381,6 +381,32 @@ func TestClientCanUseToolAutoConfiguresPermissionPromptToolName(t *testing.T) {
 	}
 }
 
+// TestClientCanUseToolReconnectAndConflict verifies a second Connect still
+// works after the first one set PermissionPromptToolName to "stdio", and a
+// conflicting tool name fails fast (Python raises ValueError).
+func TestClientCanUseToolReconnectAndConflict(t *testing.T) {
+	ctx, cancel := setupClientTestContext(t, 5*time.Second)
+	defer cancel()
+	callback := func(_ context.Context, _ string, _ map[string]any, _ ToolPermissionContext) (PermissionResult, error) {
+		return NewPermissionResultAllow(), nil
+	}
+
+	client := NewClientWithTransport(newClientMockTransport(), WithCanUseTool(callback))
+	connectClientSafely(ctx, t, client)
+	if err := client.Disconnect(); err != nil {
+		t.Fatalf("Disconnect failed: %v", err)
+	}
+	connectClientSafely(ctx, t, client)
+	disconnectClientSafely(t, client)
+
+	conflict := NewClientWithTransport(newClientMockTransport(),
+		WithCanUseTool(callback), WithPermissionPromptToolName("mcp__perm__ask"))
+	err := conflict.Connect(ctx)
+	if err == nil || !strings.Contains(err.Error(), "cannot be used with PermissionPromptToolName") {
+		t.Fatalf("Connect() error = %v, want CanUseTool conflict error", err)
+	}
+}
+
 // TestClientReceiveMessages tests message reception through client channels
 // Covers T137: Client Message Reception
 func TestClientReceiveMessages(t *testing.T) {
