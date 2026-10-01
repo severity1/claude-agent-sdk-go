@@ -96,7 +96,7 @@ func (p *Protocol) sendPermissionResponse(ctx context.Context, requestID string,
 		return fmt.Errorf("failed to marshal permission response: %w", err)
 	}
 
-	return p.transport.Write(ctx, append(data, '\n'))
+	return p.writeControlResponse(ctx, data)
 }
 
 // parsePermissionSuggestions converts raw JSON to PermissionUpdate slice.

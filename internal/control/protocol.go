@@ -34,6 +34,10 @@ type Protocol struct {
 	pendingRequests map[string]chan *Response
 	requestCounter  int64
 
+	// inflightRequests maps an incoming control request ID to the cancel func
+	// of its handler goroutine (Python: Query._inflight_requests).
+	inflightRequests map[string]context.CancelFunc
+
 	// Message routing
 	messageStream chan map[string]any
 
@@ -124,11 +128,12 @@ func WithAgents(agents map[string]any) ProtocolOption {
 // NewProtocol creates a new control protocol handler.
 func NewProtocol(transport Transport, opts ...ProtocolOption) *Protocol {
 	p := &Protocol{
-		transport:       transport,
-		pendingRequests: make(map[string]chan *Response),
-		messageStream:   make(chan map[string]any, 100),
-		initTimeout:     DefaultInitTimeout,
-		initErrChan:     make(chan error, 1),
+		transport:        transport,
+		pendingRequests:  make(map[string]chan *Response),
+		inflightRequests: make(map[string]context.CancelFunc),
+		messageStream:    make(chan map[string]any, 100),
+		initTimeout:      DefaultInitTimeout,
+		initErrChan:      make(chan error, 1),
 	}
 
 	for _, opt := range opts {
@@ -181,7 +186,7 @@ func (p *Protocol) readLoop() {
 			}
 
 			// Route the message
-			if err := p.HandleIncomingMessage(p.ctx, msg); err != nil {
+			if err := p.HandleIncomingMessageAsync(p.ctx, msg); err != nil {
 				fmt.Fprintf(os.Stderr, "claude-agent-sdk: failed to route control message: %v\n", err)
 				continue
 			}
@@ -284,6 +289,8 @@ func (p *Protocol) HandleControlInitErr(err error) {
 
 // HandleIncomingMessage routes incoming messages based on their type.
 // Control messages are handled internally, regular messages are forwarded to the stream.
+// Incoming control requests run on the caller's goroutine; read loops must use
+// HandleIncomingMessageAsync instead.
 func (p *Protocol) HandleIncomingMessage(ctx context.Context, msg map[string]any) error {
 	msgType, ok := msg["type"].(string)
 	if !ok {
@@ -301,6 +308,71 @@ func (p *Protocol) HandleIncomingMessage(ctx context.Context, msg map[string]any
 		// Regular SDK message - forward to stream
 		return p.forwardToStream(ctx, msg)
 	}
+}
+
+// HandleIncomingMessageAsync routes messages like HandleIncomingMessage, but runs
+// each incoming control request on its own goroutine, so a slow hook, permission
+// or SDK MCP callback cannot stall the reader (Python: spawn_task per request).
+// Control responses and regular messages are still routed inline, in read order.
+func (p *Protocol) HandleIncomingMessageAsync(ctx context.Context, msg map[string]any) error {
+	if msgType, _ := msg["type"].(string); msgType != MessageTypeControlRequest {
+		return p.HandleIncomingMessage(ctx, msg)
+	}
+
+	requestID, _ := msg["request_id"].(string)
+	requestCtx, cancel := context.WithCancel(ctx)
+	if !p.trackInflight(requestID, cancel) {
+		cancel()
+		return nil
+	}
+
+	go func() {
+		defer p.untrackInflight(requestID)
+		defer cancel()
+		defer func() {
+			if r := recover(); r != nil {
+				p.replyHandlerFailure(requestCtx, requestID, fmt.Errorf("control request handler panicked: %v", r))
+			}
+		}()
+		if err := p.handleIncomingControlRequest(requestCtx, msg); err != nil {
+			p.replyHandlerFailure(requestCtx, requestID, err)
+		}
+	}()
+	return nil
+}
+
+// replyHandlerFailure answers the CLI with an error so its request does not
+// hang. A cancelled handler writes nothing: the CLI or Close abandoned it.
+func (p *Protocol) replyHandlerFailure(ctx context.Context, requestID string, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "claude-agent-sdk: failed to handle control request: %v\n", err)
+	if requestID == "" {
+		return
+	}
+	if writeErr := p.sendErrorResponse(ctx, requestID, err.Error()); writeErr != nil {
+		fmt.Fprintf(os.Stderr, "claude-agent-sdk: failed to send control error response: %v\n", writeErr)
+	}
+}
+
+// trackInflight registers a handler's cancel func. Returns false after Close.
+func (p *Protocol) trackInflight(requestID string, cancel context.CancelFunc) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return false
+	}
+	if requestID != "" {
+		p.inflightRequests[requestID] = cancel
+	}
+	return true
+}
+
+func (p *Protocol) untrackInflight(requestID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.inflightRequests, requestID)
 }
 
 // handleIncomingControlRequest routes incoming control requests from CLI.
@@ -321,8 +393,8 @@ func (p *Protocol) handleIncomingControlRequest(ctx context.Context, msg map[str
 	case SubtypeMcpMessage:
 		return p.handleMcpMessageRequest(ctx, requestID, request)
 	default:
-		// Unknown subtype - ignore for forward compatibility
-		return nil
+		// Python raises here, which sends an error response to the CLI.
+		return fmt.Errorf("unsupported control request subtype: %s", subtype)
 	}
 }
 
@@ -403,6 +475,15 @@ func (p *Protocol) sendErrorResponse(ctx context.Context, requestID string, errM
 		return fmt.Errorf("failed to marshal error response: %w", err)
 	}
 
+	return p.writeControlResponse(ctx, data)
+}
+
+// writeControlResponse writes a response line unless the handler was cancelled:
+// the CLI or Close abandoned the request, so it gets no reply (Python parity).
+func (p *Protocol) writeControlResponse(ctx context.Context, data []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return p.transport.Write(ctx, append(data, '\n'))
 }
 
@@ -553,6 +634,12 @@ func (p *Protocol) Close() error {
 		return nil
 	}
 	p.closed = true
+	// Cancel in-flight handlers without waiting: a user callback that ignores
+	// ctx must not block Close (Python close() cancels child tasks too).
+	for requestID, cancel := range p.inflightRequests {
+		cancel()
+		delete(p.inflightRequests, requestID)
+	}
 	p.mu.Unlock()
 
 	// Cancel background goroutines

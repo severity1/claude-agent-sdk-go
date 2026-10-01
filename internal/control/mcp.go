@@ -139,7 +139,7 @@ func (p *Protocol) sendMcpResponse(ctx context.Context, requestID string, mcpRes
 	if err != nil {
 		return fmt.Errorf("failed to marshal MCP response: %w", err)
 	}
-	return p.transport.Write(ctx, append(data, '\n'))
+	return p.writeControlResponse(ctx, data)
 }
 
 // buildToolsListResult builds the JSONRPC tools/list response payload from a

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/severity1/claude-agent-sdk-go/internal/control"
 	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
 
@@ -139,5 +140,44 @@ func connectWithWatchdog(ctx context.Context, t *testing.T, transport *Transport
 	case <-time.After(limit):
 		t.Fatalf("Connect() did not return within %s", limit)
 		return nil
+	}
+}
+
+// TestTransportSlowPermissionCallbackDoesNotBlockReader verifies on the real
+// handleStdout path that a blocked CanUseTool callback does not stop the next
+// control request from being handled.
+func TestTransportSlowPermissionCallbackDoesNotBlockReader(t *testing.T) {
+	ctx, cancel := setupTransportTestContext(t, 30*time.Second)
+	defer cancel()
+
+	fastCalled := make(chan struct{})
+	slowSawFast := make(chan bool, 1)
+	options := &shared.Options{
+		CanUseTool: func(_ context.Context, toolName string, _ map[string]any, _ any) (any, error) {
+			switch toolName {
+			case mockFastToolName:
+				close(fastCalled)
+			case mockSlowToolName:
+				select {
+				case <-fastCalled:
+					slowSawFast <- true
+				case <-time.After(10 * time.Second):
+					slowSawFast <- false
+				}
+			}
+			return control.NewPermissionResultAllow(), nil
+		},
+	}
+	transport := New(newTransportMockCLIMode(t, mockModeTwoPermissionReqs), options, "sdk-go")
+	t.Cleanup(func() { _ = transport.Close() })
+	connectTransportSafely(ctx, t, transport)
+
+	select {
+	case ok := <-slowSawFast:
+		if !ok {
+			t.Fatal("second can_use_tool request was not handled while the first callback blocked")
+		}
+	case <-ctx.Done():
+		t.Fatal("slow callback never ran")
 	}
 }

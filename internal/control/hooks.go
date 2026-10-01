@@ -203,7 +203,7 @@ func (p *Protocol) sendHookResponse(ctx context.Context, requestID string, resul
 		return fmt.Errorf("failed to marshal hook response: %w", err)
 	}
 
-	return p.transport.Write(ctx, append(data, '\n'))
+	return p.writeControlResponse(ctx, data)
 }
 
 // generateHookRegistrations creates hook registrations for initialization.

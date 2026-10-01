@@ -58,6 +58,7 @@ const (
 	mockModeStdoutClosedAlive   = "stdout_closed_alive"
 	mockModeHangInit            = "hang_init"
 	mockModeEarlyErrorResult    = "early_error_result"
+	mockModeTwoPermissionReqs   = "two_permission_requests"
 )
 
 // runMockCLI dispatches to per-mode handlers. Kept thin so gocyclo stays low.
@@ -99,6 +100,8 @@ func runMockCLI(mode string) {
 		time.Sleep(time.Hour)
 	case mockModeEarlyErrorResult:
 		runMockEarlyErrorResult()
+	case mockModeTwoPermissionReqs:
+		runMockTwoPermissionRequests()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown mock CLI mode: %s\n", mode)
 		os.Exit(2)
@@ -267,6 +270,33 @@ func runMockEarlyErrorResult() {
 		}
 	}
 	fmt.Println(mockErrorResult)
+	controlEchoLoop(os.Stdin, os.Stdout)
+}
+
+// Tool names used by the two_permission_requests mode.
+const (
+	mockSlowToolName = "slow_tool"
+	mockFastToolName = "fast_tool"
+)
+
+// runMockTwoPermissionRequests answers initialize, then sends two can_use_tool
+// requests back to back, then keeps echoing control requests.
+func runMockTwoPermissionRequests() {
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if isControlRequest(line) {
+			fmt.Println(buildControlResponse(extractRequestID(line)))
+			break
+		}
+	}
+	for _, tool := range []string{mockSlowToolName, mockFastToolName} {
+		fmt.Printf(
+			`{"type":"control_request","request_id":"req_%s","request":{"subtype":"can_use_tool","tool_name":%q,"input":{}}}`+"\n",
+			tool, tool,
+		)
+	}
 	controlEchoLoop(os.Stdin, os.Stdout)
 }
 

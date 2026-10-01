@@ -29,7 +29,7 @@ control/
 **Protocol Flow**:
 1. `Initialize()`: Handshake with CLI, negotiate capabilities
 2. `SendControlRequest()`: Send JSON-RPC style requests with correlation IDs
-3. `HandleIncomingMessage()`: Route responses to pending requests
+3. `HandleIncomingMessage()`: Route responses to pending requests; read loops call `HandleIncomingMessageAsync()`, which runs each incoming control request on its own goroutine with a per-request ctx tracked in `inflightRequests` (cancelled by `Close()` without waiting). Handler errors and panics send an error `control_response` (unknown subtypes too); a cancelled handler writes nothing (`writeControlResponse` checks ctx)
 4. Hook/Permission callbacks: Invoked on tool use events (hooks.go, permissions.go)
 5. MCP messages: Route to SDK MCP servers (mcp.go)
 

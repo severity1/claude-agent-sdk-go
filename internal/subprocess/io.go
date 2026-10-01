@@ -78,9 +78,9 @@ func (t *Transport) handleStdout(protocol *control.Protocol) {
 			if rawCtrl, ok := msg.(*shared.RawControlMessage); ok {
 				// Route control messages to the protocol for request/response correlation
 				if protocol != nil {
-					// HandleIncomingMessage routes control responses to pending requests
-					// and forwards non-control messages to the protocol's message stream
-					_ = protocol.HandleIncomingMessage(t.ctx, rawCtrl.Data)
+					// Control requests run on their own goroutine so a slow callback
+					// cannot stall this reader; responses route inline.
+					_ = protocol.HandleIncomingMessageAsync(t.ctx, rawCtrl.Data)
 				}
 				// Don't send control messages to msgChan - they're internal to the protocol
 				continue
