@@ -28,8 +28,8 @@ The Go SDK provides two ways to interact with Claude Code:
 | **Connection**      | Managed automatically         | Manual or WithClient helper        |
 | **Streaming**       | Via MessageIterator           | Via channels or iterator           |
 | **Interrupts**      | Not supported                 | Supported                          |
-| **Hooks**           | Not supported                 | Supported                          |
-| **Custom Tools**    | Not supported                 | Supported                          |
+| **Hooks**           | Supported                     | Supported                          |
+| **Custom Tools**    | Supported (SDK MCP servers)   | Supported                          |
 | **Continue Chat**   | New session each time         | Maintains conversation             |
 | **Use Case**        | One-off tasks                 | Continuous conversations           |
 
@@ -272,7 +272,7 @@ iterator, err := claudecode.Query(ctx, "What is 5 + 3?",
 Create a new MCP tool definition.
 
 ```go
-func NewTool(name, description string, inputSchema map[string]any, handler McpToolHandler) *McpTool
+func NewTool(name, description string, inputSchema map[string]any, handler McpToolHandler, opts ...ToolOption) *McpTool
 ```
 
 #### Parameters
@@ -283,10 +283,72 @@ func NewTool(name, description string, inputSchema map[string]any, handler McpTo
 | `description` | `string`           | Human-readable description               |
 | `inputSchema` | `map[string]any`   | JSON Schema for input validation         |
 | `handler`     | `McpToolHandler`   | Function that handles tool execution     |
+| `opts`        | `...ToolOption`    | Optional tool settings, such as `WithToolAnnotations()` |
 
 #### Returns
 
 Returns an `*McpTool` that can be passed to `CreateSDKMcpServer()`.
+
+### `WithToolAnnotations()`
+
+Attach MCP tool annotations (behavior hints) to a tool. The annotations are sent in the `tools/list` response. A nil value omits the `annotations` key.
+
+```go
+func WithToolAnnotations(ann *ToolAnnotations) ToolOption
+```
+
+```go
+readOnly := true
+searchTool := claudecode.NewTool(
+    "search",
+    "Search the index",
+    map[string]any{"query": "string"},
+    searchHandler,
+    claudecode.WithToolAnnotations(&claudecode.ToolAnnotations{
+        ReadOnlyHint: &readOnly,
+    }),
+)
+```
+
+### `ListSessions()`
+
+List metadata for past sessions, sorted by `LastModified` (newest first). This reads session transcripts on disk and does not start the CLI.
+
+```go
+func ListSessions(opts ...SessionOption) ([]SDKSessionInfo, error)
+```
+
+```go
+sessions, err := claudecode.ListSessions(
+    claudecode.WithSessionDirectory("/path/to/project"),
+    claudecode.WithSessionLimit(10),
+)
+```
+
+### `GetSessionMessages()`
+
+Read the user and assistant messages from a session transcript.
+
+```go
+func GetSessionMessages(sessionID string, opts ...SessionOption) ([]SessionMessage, error)
+```
+
+### `GetSessionInfo()`
+
+Get metadata for one session. Returns `nil` (not an error) when the session is not found.
+
+```go
+func GetSessionInfo(sessionID string, opts ...SessionOption) (*SDKSessionInfo, error)
+```
+
+#### Session Options
+
+| Option | Description |
+|:-------|:------------|
+| `WithSessionDirectory(dir string)` | Scope the search to one project directory. When omitted, all projects are searched |
+| `WithSessionLimit(n int)` | Maximum number of results |
+| `WithSessionOffset(n int)` | Skip the first n messages (`GetSessionMessages` only) |
+| `WithIncludeWorktrees(include bool)` | Include git worktree directories (default true; only with `WithSessionDirectory`) |
 
 ---
 
@@ -307,6 +369,7 @@ type Client interface {
     SetModel(ctx context.Context, model *string) error
     SetPermissionMode(ctx context.Context, mode PermissionMode) error
     RewindFiles(ctx context.Context, messageUUID string) error
+    GetMcpStatus(ctx context.Context) (*McpStatusResponse, error)
     GetStreamIssues() []StreamIssue
     GetStreamStats() StreamStats
     GetServerInfo(ctx context.Context) (map[string]interface{}, error)
@@ -401,6 +464,14 @@ Restore files to their state at a specific user message. Requires `WithFileCheck
 
 ```go
 func (c *ClientImpl) RewindFiles(ctx context.Context, messageUUID string) error
+```
+
+#### `GetMcpStatus()`
+
+Get the connection status of all configured MCP servers. Only works after `Connect()`. See [MCP Status Types](#mcp-status-types).
+
+```go
+func (c *ClientImpl) GetMcpStatus(ctx context.Context) (*McpStatusResponse, error)
 ```
 
 #### `GetStreamIssues()`
@@ -627,6 +698,30 @@ Set a fallback model if primary is unavailable.
 func WithFallbackModel(model string) Option
 ```
 
+#### `WithEffort()`
+
+Set the effort level (`--effort`). It controls how many tokens Claude spends per response. Values other than the constants are passed through to the CLI.
+
+```go
+func WithEffort(effort EffortLevel) Option
+```
+
+```go
+type EffortLevel string
+
+const (
+    EffortLow    EffortLevel = "low"
+    EffortMedium EffortLevel = "medium"
+    EffortHigh   EffortLevel = "high"
+    EffortXHigh  EffortLevel = "xhigh"
+    EffortMax    EffortLevel = "max"
+)
+```
+
+```go
+claudecode.Query(ctx, prompt, claudecode.WithEffort(claudecode.EffortHigh))
+```
+
 #### `WithMaxTurns()`
 
 Limit the number of conversation turns.
@@ -782,6 +877,46 @@ Available sources:
 claudecode.Query(ctx, prompt, claudecode.WithSettingSources(claudecode.SettingSourceProject))
 ```
 
+### Skills Options
+
+When Skills are set and `WithSettingSources()` is not used, the SDK sets the setting sources to `user` and `project` so the CLI can find installed Skills.
+
+#### `WithSkillsAll()`
+
+Enable every discovered Skill. Adds `Skill` to the allowed tools.
+
+```go
+func WithSkillsAll() Option
+```
+
+#### `WithSkillsList()`
+
+Enable only the named Skills. Adds `Skill(name)` to the allowed tools for each name. Use `"plugin:skill"` for plugin Skills.
+
+```go
+func WithSkillsList(names ...string) Option
+```
+
+```go
+claudecode.Query(ctx, prompt, claudecode.WithSkillsList("pdf", "docx"))
+```
+
+#### `WithSkillsDisabled()`
+
+Disable all Skills (an empty list).
+
+```go
+func WithSkillsDisabled() Option
+```
+
+#### `WithSkills()`
+
+Set the Skills value directly: `SkillsAll` (`"all"`), a `[]string` of names, or `[]string{}`. Prefer the typed helpers above.
+
+```go
+func WithSkills(skills any) Option
+```
+
 ### Advanced Options
 
 #### `WithExtraArgs()`
@@ -860,7 +995,7 @@ func WithFileCheckpointing() Option
 
 #### `WithAgents()`
 
-Define multiple custom agents.
+Define multiple custom agents. Both `Query()` and `Client` send the agent definitions on the `initialize` control request over stdin, not as a CLI flag, so large definitions are not limited by the OS argument size.
 
 ```go
 func WithAgents(agents map[string]AgentDefinition) Option
@@ -1026,6 +1161,8 @@ Set a callback for programmatic tool permission control.
 func WithCanUseTool(callback CanUseToolCallback) Option
 ```
 
+When a callback is set, both `Query()` and `Client.Connect()` set `PermissionPromptToolName` to `"stdio"` so the CLI sends permission requests to the callback. If you also set `WithPermissionPromptToolName()` to a value other than `"stdio"`, `Query()` and `Connect()` return an error.
+
 ```go
 claudecode.Query(ctx, prompt, claudecode.WithCanUseTool(
     func(ctx context.Context, toolName string, input map[string]any, permCtx claudecode.ToolPermissionContext) (claudecode.PermissionResult, error) {
@@ -1098,8 +1235,15 @@ type UserMessage struct {
     Content         interface{} // string or []ContentBlock
     UUID            *string
     ParentToolUseID *string
+    ToolUseResult   map[string]any
 }
 ```
+
+Methods:
+- `GetUUID() string` - UUID or empty string
+- `GetParentToolUseID() string` - Parent tool use ID or empty string
+- `HasToolUseResult() bool` - Check if tool use result metadata is present
+- `GetToolUseResult() map[string]any` - Tool use result metadata (for example `filePath`, `structuredPatch`)
 
 ### `AssistantMessage`
 
@@ -1112,9 +1256,11 @@ type AssistantMessage struct {
     Model           string
     Error           *AssistantMessageError
     ParentToolUseID *string
-    Usage           *map[string]any
+    Usage           *map[string]any // token usage for this one API round-trip
 }
 ```
+
+`Usage` is the usage for a single API round-trip, not a running total. One API response can arrive as several `AssistantMessage` events with the same `Usage`, so do not sum it across messages.
 
 Methods:
 - `HasError() bool` - Check if message contains an error
@@ -1144,6 +1290,7 @@ type ResultMessage struct {
     DurationMs       int
     DurationAPIMs    int
     IsError          bool
+    Errors           []string
     NumTurns         int
     SessionID        string
     TotalCostUSD     *float64
@@ -1165,6 +1312,31 @@ type StreamEvent struct {
     ParentToolUseID *string
 }
 ```
+
+### `RateLimitEventMessage`
+
+Rate limit status update from the CLI.
+
+```go
+type RateLimitEventMessage struct {
+    MessageType   string
+    RateLimitInfo RateLimitInfo
+    UUID          string
+    SessionID     string
+}
+
+type RateLimitInfo struct {
+    Status          string // for example RateLimitStatusAllowed ("allowed")
+    ResetsAt        int64
+    RateLimitType   string
+    OverageStatus   string
+    OverageResetsAt int64
+    IsUsingOverage  bool
+}
+```
+
+Methods:
+- `IsAllowed() bool` - Check if `Status` is `RateLimitStatusAllowed`
 
 ### `RawControlMessage`
 
@@ -1188,6 +1360,7 @@ const (
     MessageTypeControlRequest  = "control_request"
     MessageTypeControlResponse = "control_response"
     MessageTypeStreamEvent     = "stream_event"
+    MessageTypeRateLimitEvent  = "rate_limit_event"
 )
 ```
 
@@ -1438,14 +1611,20 @@ Supported hook event types.
 type HookEvent string
 
 const (
-    HookEventPreToolUse        HookEvent = "PreToolUse"
-    HookEventPostToolUse       HookEvent = "PostToolUse"
-    HookEventUserPromptSubmit  HookEvent = "UserPromptSubmit"
-    HookEventStop              HookEvent = "Stop"
-    HookEventSubagentStop      HookEvent = "SubagentStop"
-    HookEventPreCompact        HookEvent = "PreCompact"
+    HookEventPreToolUse         HookEvent = "PreToolUse"
+    HookEventPostToolUse        HookEvent = "PostToolUse"
+    HookEventPostToolUseFailure HookEvent = "PostToolUseFailure"
+    HookEventUserPromptSubmit   HookEvent = "UserPromptSubmit"
+    HookEventStop               HookEvent = "Stop"
+    HookEventSubagentStop       HookEvent = "SubagentStop"
+    HookEventPreCompact         HookEvent = "PreCompact"
+    HookEventNotification       HookEvent = "Notification"
+    HookEventSubagentStart      HookEvent = "SubagentStart"
+    HookEventPermissionRequest  HookEvent = "PermissionRequest"
 )
 ```
+
+Only `PreToolUse` and `PostToolUse` have convenience helpers (`WithPreToolUseHook`, `WithPostToolUseHook`). Use `WithHook(event, matcher, callback)` for the other events.
 
 ### `HookCallback`
 
@@ -1495,6 +1674,8 @@ type HookJSONOutput struct {
 
 ### Hook Input Types
 
+The `input` argument of a `HookCallback` is a pointer to one of these types (for example `*PreToolUseHookInput`). Use a type assertion to read it.
+
 #### `BaseHookInput`
 
 Common fields for all hook inputs.
@@ -1518,6 +1699,7 @@ type PreToolUseHookInput struct {
     HookEventName string
     ToolName      string
     ToolInput     map[string]any
+    ToolUseID     string
 }
 ```
 
@@ -1532,6 +1714,23 @@ type PostToolUseHookInput struct {
     ToolName      string
     ToolInput     map[string]any
     ToolResponse  any
+    ToolUseID     string
+}
+```
+
+#### `PostToolUseFailureHookInput`
+
+Input for PostToolUseFailure hooks.
+
+```go
+type PostToolUseFailureHookInput struct {
+    BaseHookInput
+    HookEventName string
+    ToolName      string
+    ToolInput     map[string]any
+    ToolUseID     string
+    Error         string
+    IsInterrupt   *bool // nil when the CLI omits the field
 }
 ```
 
@@ -1566,8 +1765,11 @@ Input for SubagentStop hooks.
 ```go
 type SubagentStopHookInput struct {
     BaseHookInput
-    HookEventName  string
-    StopHookActive bool
+    HookEventName       string
+    StopHookActive      bool
+    AgentID             string
+    AgentTranscriptPath string
+    AgentType           string
 }
 ```
 
@@ -1584,15 +1786,60 @@ type PreCompactHookInput struct {
 }
 ```
 
+#### `NotificationHookInput`
+
+Input for Notification hooks.
+
+```go
+type NotificationHookInput struct {
+    BaseHookInput
+    HookEventName    string
+    Message          string
+    Title            *string // nil when the CLI omits the field
+    NotificationType string
+}
+```
+
+#### `SubagentStartHookInput`
+
+Input for SubagentStart hooks.
+
+```go
+type SubagentStartHookInput struct {
+    BaseHookInput
+    HookEventName string
+    AgentID       string
+    AgentType     string
+}
+```
+
+#### `PermissionRequestHookInput`
+
+Input for PermissionRequest hooks.
+
+```go
+type PermissionRequestHookInput struct {
+    BaseHookInput
+    HookEventName         string
+    ToolName              string
+    ToolInput             map[string]any
+    PermissionSuggestions []any // nil when the CLI omits the field
+}
+```
+
 ### Hook-Specific Output Types
+
+Set `HookEventName` to the event name (for example `"PreToolUse"`). Optional fields are pointers so that an unset field is left out of the JSON.
 
 #### `PreToolUseHookSpecificOutput`
 
 ```go
 type PreToolUseHookSpecificOutput struct {
-    PermissionDecision       string
-    PermissionDecisionReason string
+    HookEventName            string
+    PermissionDecision       *string // "allow", "deny", or "ask"
+    PermissionDecisionReason *string
     UpdatedInput             map[string]any
+    AdditionalContext        *string
 }
 ```
 
@@ -1600,7 +1847,18 @@ type PreToolUseHookSpecificOutput struct {
 
 ```go
 type PostToolUseHookSpecificOutput struct {
-    AdditionalContext string
+    HookEventName        string
+    AdditionalContext    *string
+    UpdatedMCPToolOutput any // wire key: updatedMCPToolOutput
+}
+```
+
+#### `PostToolUseFailureHookSpecificOutput`
+
+```go
+type PostToolUseFailureHookSpecificOutput struct {
+    HookEventName     string
+    AdditionalContext *string
 }
 ```
 
@@ -1608,7 +1866,35 @@ type PostToolUseHookSpecificOutput struct {
 
 ```go
 type UserPromptSubmitHookSpecificOutput struct {
-    AdditionalContext string
+    HookEventName     string
+    AdditionalContext *string
+}
+```
+
+#### `NotificationHookSpecificOutput`
+
+```go
+type NotificationHookSpecificOutput struct {
+    HookEventName     string
+    AdditionalContext *string
+}
+```
+
+#### `SubagentStartHookSpecificOutput`
+
+```go
+type SubagentStartHookSpecificOutput struct {
+    HookEventName     string
+    AdditionalContext *string
+}
+```
+
+#### `PermissionRequestHookSpecificOutput`
+
+```go
+type PermissionRequestHookSpecificOutput struct {
+    HookEventName string
+    Decision      map[string]any // required
 }
 ```
 
@@ -1620,15 +1906,21 @@ err := claudecode.WithClient(ctx, func(client claudecode.Client) error {
 },
     claudecode.WithAllowedTools("Bash"),
     claudecode.WithPreToolUseHook("Bash", func(ctx context.Context, input any, toolUseID *string, hookCtx claudecode.HookContext) (claudecode.HookJSONOutput, error) {
-        hookInput := input.(claudecode.PreToolUseHookInput)
-        command := hookInput.ToolInput["command"].(string)
+        hookInput, ok := input.(*claudecode.PreToolUseHookInput)
+        if !ok {
+            return claudecode.HookJSONOutput{}, nil
+        }
+        command, _ := hookInput.ToolInput["command"].(string)
 
         // Block dangerous commands
         if strings.Contains(command, "rm -rf") {
+            decision := "deny"
+            reason := "Dangerous command blocked"
             return claudecode.HookJSONOutput{
                 HookSpecificOutput: claudecode.PreToolUseHookSpecificOutput{
-                    PermissionDecision:       "deny",
-                    PermissionDecisionReason: "Dangerous command blocked",
+                    HookEventName:            "PreToolUse",
+                    PermissionDecision:       &decision,
+                    PermissionDecisionReason: &reason,
                 },
             }, nil
         }
@@ -1652,6 +1944,7 @@ type McpTool struct {
     description string
     inputSchema map[string]any
     handler     McpToolHandler
+    annotations *ToolAnnotations
 }
 ```
 
@@ -1659,7 +1952,30 @@ Methods:
 - `Name() string`
 - `Description() string`
 - `InputSchema() map[string]any`
+- `Annotations() *ToolAnnotations`
 - `Call(ctx context.Context, args map[string]any) (*McpToolResult, error)`
+
+### `ToolOption`
+
+Functional option for `NewTool()`.
+
+```go
+type ToolOption func(*McpTool)
+```
+
+### `ToolAnnotations`
+
+MCP tool behavior hints, set with `WithToolAnnotations()`. All fields are optional. Do not confuse this type with `McpToolAnnotations`, which is part of the MCP status response.
+
+```go
+type ToolAnnotations struct {
+    Title           *string // wire key: title
+    ReadOnlyHint    *bool   // wire key: readOnlyHint
+    DestructiveHint *bool   // wire key: destructiveHint
+    IdempotentHint  *bool   // wire key: idempotentHint
+    OpenWorldHint   *bool   // wire key: openWorldHint
+}
+```
 
 ### `McpToolHandler`
 
@@ -1702,12 +2018,13 @@ type McpToolDefinition struct {
     Name        string
     Description string
     InputSchema map[string]any
+    Annotations *ToolAnnotations
 }
 ```
 
 ### `McpServer`
 
-Interface for MCP servers.
+Interface for MCP servers. It is defined in an internal package and is not exported from `claudecode`. `SdkMcpServer` implements it.
 
 ```go
 type McpServer interface {
@@ -1741,9 +2058,10 @@ const (
     McpServerTypeStdio McpServerType = "stdio"
     McpServerTypeSSE   McpServerType = "sse"
     McpServerTypeHTTP  McpServerType = "http"
-    McpServerTypeSdk   McpServerType = "sdk"
 )
 ```
+
+`McpSdkServerConfig` uses the type value `"sdk"`. `CreateSDKMcpServer()` sets it for you.
 
 #### `McpStdioServerConfig`
 
@@ -1780,10 +2098,79 @@ type McpHTTPServerConfig struct {
 
 ```go
 type McpSdkServerConfig struct {
-    Type     McpServerType
-    Name     string
-    Instance McpServer
+    Type       McpServerType
+    Name       string
+    Instance   McpServer // not sent to the CLI
+    AlwaysLoad bool
 }
+```
+
+### MCP Status Types
+
+Returned by `Client.GetMcpStatus()`.
+
+```go
+type McpStatusResponse struct {
+    McpServers []McpServerStatus
+}
+
+type McpServerStatus struct {
+    Name       string
+    Status     McpServerConnectionStatus
+    ServerInfo *McpServerInfo // set only when Status is connected
+    Error      *string        // set only when Status is failed
+    Config     *McpServerStatusConfig
+    Scope      *string
+    Tools      []McpToolInfo  // set only when Status is connected
+}
+
+type McpServerInfo struct {
+    Name    string
+    Version string
+}
+
+type McpToolInfo struct {
+    Name        string
+    Description *string
+    Annotations *McpToolAnnotations
+}
+
+type McpToolAnnotations struct {
+    ReadOnly    *bool
+    Destructive *bool
+    OpenWorld   *bool
+}
+
+type McpServerStatusConfig struct {
+    Type    string // see McpServerConfigType* constants
+    Command *string
+    Args    []string
+    URL     *string
+    Headers map[string]string
+    Env     map[string]string
+    Name    *string
+    ID      *string
+}
+```
+
+```go
+type McpServerConnectionStatus string
+
+const (
+    McpServerConnectionStatusConnected McpServerConnectionStatus = "connected"
+    McpServerConnectionStatusFailed    McpServerConnectionStatus = "failed"
+    McpServerConnectionStatusNeedsAuth McpServerConnectionStatus = "needs-auth"
+    McpServerConnectionStatusPending   McpServerConnectionStatus = "pending"
+    McpServerConnectionStatusDisabled  McpServerConnectionStatus = "disabled"
+)
+
+const (
+    McpServerConfigTypeStdio    = "stdio"
+    McpServerConfigTypeSSE      = "sse"
+    McpServerConfigTypeHTTP     = "http"
+    McpServerConfigTypeSDK      = "sdk"
+    McpServerConfigTypeClaudeAI = "claudeai-proxy"
+)
 ```
 
 ---
@@ -2103,15 +2490,19 @@ Interface for CLI communication (primarily for testing).
 type Transport interface {
     Connect(ctx context.Context) error
     SendMessage(ctx context.Context, message StreamMessage) error
+    EndInput(ctx context.Context) error
     ReceiveMessages(ctx context.Context) (<-chan Message, <-chan error)
     Interrupt(ctx context.Context) error
     SetModel(ctx context.Context, model *string) error
-    SetPermissionMode(ctx context.Context, mode string) error
+    SetPermissionMode(ctx context.Context, mode PermissionMode) error
     RewindFiles(ctx context.Context, userMessageID string) error
+    GetMcpStatus(ctx context.Context) (*McpStatusResponse, error)
     Close() error
     GetValidator() *StreamValidator
 }
 ```
+
+`EndInput()` closes the write side of the transport (stdin for the subprocess transport) and leaves the receive side open. It is idempotent. `Query()` calls it after it writes the prompt, or after the first `ResultMessage` when hooks, `CanUseTool`, SDK MCP servers, or file checkpointing need the control protocol. Custom transports must implement it; a no-op `return nil` is fine for tests.
 
 ---
 
