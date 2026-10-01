@@ -34,6 +34,8 @@ type Transport struct {
 	cliPath    string
 	options    *shared.Options
 	entrypoint string // CLAUDE_CODE_ENTRYPOINT value (sdk-go or sdk-go-client)
+	// processDone closes after the sole cmd.Wait call returns.
+	processDone chan struct{}
 
 	// Connection state
 	connected bool
@@ -44,6 +46,8 @@ type Transport struct {
 	stdout     io.ReadCloser
 	stderr     *os.File      // Temporary file for stderr isolation
 	stderrPipe io.ReadCloser // Pipe for callback-based stderr handling
+	// childPipeEnds are the write ends given to the child; closed after Start.
+	childPipeEnds []*os.File
 
 	// Temporary files (cleaned up on Close)
 	mcpConfigFile *os.File // Temporary MCP config file
@@ -141,13 +145,16 @@ func (t *Transport) Connect(ctx context.Context) error {
 	}
 
 	// Start the process
-	if err := t.cmd.Start(); err != nil {
+	err = t.cmd.Start()
+	t.closeChildPipeEnds()
+	if err != nil {
 		t.cleanup()
 		return shared.NewConnectionError(
 			fmt.Sprintf("failed to start Claude CLI: %v", err),
 			err,
 		)
 	}
+	t.startProcessWaiter()
 
 	// Set up context for goroutine management
 	t.ctx, t.cancel = context.WithCancel(ctx)
@@ -157,9 +164,14 @@ func (t *Transport) Connect(ctx context.Context) error {
 	t.errChan = make(chan error, channelBufferSize)
 	t.stdoutDone = make(chan struct{})
 
+	// Build the protocol before handleStdout starts so early CLI output never
+	// races with the t.protocol assignment.
+	t.protocolAdapter = NewProtocolAdapter(t.stdin)
+	t.protocol = control.NewProtocol(t.protocolAdapter, t.buildProtocolOptions()...)
+
 	// Start I/O handling goroutines
 	t.wg.Add(1)
-	go t.handleStdout()
+	go t.handleStdout(t.protocol)
 
 	// Start stderr callback goroutine if callback is configured
 	if t.stderrPipe != nil && t.options != nil && t.options.StderrCallback != nil {
@@ -185,9 +197,6 @@ func (t *Transport) Connect(ctx context.Context) error {
 // handshake. The handshake is unconditional so the agents map always
 // reaches the CLI on every connection.
 func (t *Transport) setupControlProtocol(ctx context.Context) error {
-	t.protocolAdapter = NewProtocolAdapter(t.stdin)
-	t.protocol = control.NewProtocol(t.protocolAdapter, t.buildProtocolOptions()...)
-
 	if err := t.protocol.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start control protocol: %w", err)
 	}

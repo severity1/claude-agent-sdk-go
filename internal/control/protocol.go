@@ -457,6 +457,13 @@ func (p *Protocol) Initialize(ctx context.Context) (*InitializeResponse, error) 
 	return resp, err
 }
 
+// IsInitialized reports whether the initialize handshake completed.
+func (p *Protocol) IsInitialized() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.initialized
+}
+
 // Interrupt sends an interrupt control request to the CLI.
 func (p *Protocol) Interrupt(ctx context.Context) error {
 	_, err := p.SendControlRequest(ctx, InterruptRequest{

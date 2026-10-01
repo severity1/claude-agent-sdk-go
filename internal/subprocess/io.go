@@ -4,15 +4,18 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
+	"github.com/severity1/claude-agent-sdk-go/internal/control"
 	"github.com/severity1/claude-agent-sdk-go/internal/parser"
 	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
 
-// handleStdout processes stdout in a separate goroutine
-func (t *Transport) handleStdout() {
+// handleStdout processes stdout in a separate goroutine. protocol is passed in
+// because teardownLocked clears t.protocol while this goroutine may still run.
+func (t *Transport) handleStdout(protocol *control.Protocol) {
 	defer t.wg.Done()
 	defer close(t.msgChan)
 	defer close(t.errChan)
@@ -69,15 +72,15 @@ func (t *Transport) handleStdout() {
 			// If this is an error ResultMessage before we're fully connected,
 			// it means the CLI failed during init (e.g., invalid session ID).
 			// Route the error to the control protocol to unblock Initialize().
-			t.routeInitError(msg)
+			routeInitError(protocol, msg)
 
 			// Check if this is a control message that should be routed to the protocol
 			if rawCtrl, ok := msg.(*shared.RawControlMessage); ok {
 				// Route control messages to the protocol for request/response correlation
-				if t.protocol != nil {
+				if protocol != nil {
 					// HandleIncomingMessage routes control responses to pending requests
 					// and forwards non-control messages to the protocol's message stream
-					_ = t.protocol.HandleIncomingMessage(t.ctx, rawCtrl.Data)
+					_ = protocol.HandleIncomingMessage(t.ctx, rawCtrl.Data)
 				}
 				// Don't send control messages to msgChan - they're internal to the protocol
 				continue
@@ -138,14 +141,14 @@ func (t *Transport) handleStderrCallback() {
 }
 
 // routeInitError checks if a message is an error ResultMessage arriving before
-// the transport is fully connected, and routes it to the control protocol to
+// the initialize handshake completes, and routes it to the control protocol to
 // unblock Initialize().
-func (t *Transport) routeInitError(msg shared.Message) {
+func routeInitError(protocol *control.Protocol, msg shared.Message) {
 	resultMsg, ok := msg.(*shared.ResultMessage)
-	if !ok || t.connected || !resultMsg.IsError || t.protocol == nil {
+	if !ok || !resultMsg.IsError || protocol == nil || protocol.IsInitialized() {
 		return
 	}
-	t.protocol.HandleControlInitErr(errors.New(formatInitError(resultMsg)))
+	protocol.HandleControlInitErr(errors.New(formatInitError(resultMsg)))
 }
 
 // formatInitError builds a meaningful error string from a ResultMessage that
@@ -166,7 +169,7 @@ func (t *Transport) setupStderr() error {
 	switch {
 	case t.options != nil && t.options.StderrCallback != nil:
 		// Create pipe for callback-based stderr handling
-		stderrPipe, err := t.cmd.StderrPipe()
+		stderrPipe, err := t.newChildOutputPipe(&t.cmd.Stderr)
 		if err != nil {
 			return fmt.Errorf("failed to create stderr pipe: %w", err)
 		}
@@ -187,6 +190,28 @@ func (t *Transport) setupStderr() error {
 	return nil
 }
 
+// newChildOutputPipe connects a child output stream to an os.Pipe and returns
+// the read end. Unlike cmd.StdoutPipe, cmd.Wait never closes this reader, so
+// output still buffered in the pipe when the process exits is not lost.
+func (t *Transport) newChildOutputPipe(childStream *io.Writer) (*os.File, error) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	*childStream = writer
+	t.childPipeEnds = append(t.childPipeEnds, writer)
+	return reader, nil
+}
+
+// closeChildPipeEnds closes the parent's copies of the child-side pipe ends,
+// so the readers see EOF once the child exits. Safe to call more than once.
+func (t *Transport) closeChildPipeEnds() {
+	for _, f := range t.childPipeEnds {
+		_ = f.Close()
+	}
+	t.childPipeEnds = nil
+}
+
 // setupIoPipes configures stdin, stdout, and stderr pipes for the subprocess.
 // Stdin is always opened so the SDK can write the initialize handshake and
 // subsequent user messages. Stderr is configured via setupStderr.
@@ -197,7 +222,7 @@ func (t *Transport) setupIoPipes() error {
 		return fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
 
-	t.stdout, err = t.cmd.StdoutPipe()
+	t.stdout, err = t.newChildOutputPipe(&t.cmd.Stdout)
 	if err != nil {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}

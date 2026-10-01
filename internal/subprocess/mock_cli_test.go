@@ -53,6 +53,11 @@ const (
 	mockModeWithControlProtocol = "with_control_protocol"
 	mockModeWithStderr          = "with_stderr"
 	mockModeInitError           = "init_error"
+	mockModeBurstExit           = "burst_exit"
+	mockModeExitBeforeInit      = "exit_before_init"
+	mockModeStdoutClosedAlive   = "stdout_closed_alive"
+	mockModeHangInit            = "hang_init"
+	mockModeEarlyErrorResult    = "early_error_result"
 )
 
 // runMockCLI dispatches to per-mode handlers. Kept thin so gocyclo stays low.
@@ -81,6 +86,19 @@ func runMockCLI(mode string) {
 		runMockWithStderr()
 	case mockModeInitError:
 		runMockInitError()
+	case mockModeBurstExit:
+		runMockBurstExit()
+	case mockModeExitBeforeInit:
+		os.Exit(17)
+	case mockModeStdoutClosedAlive:
+		// Stay alive with stdout closed: stdout EOF must not be taken as exit.
+		_ = os.Stdout.Close()
+		time.Sleep(time.Hour)
+	case mockModeHangInit:
+		// Never answer initialize, so only ctx cancellation ends Connect.
+		time.Sleep(time.Hour)
+	case mockModeEarlyErrorResult:
+		runMockEarlyErrorResult()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown mock CLI mode: %s\n", mode)
 		os.Exit(2)
@@ -207,6 +225,51 @@ func runMockInitError() {
 	}
 }
 
+// burstExitMessageCount is large enough to overflow the OS pipe buffer, so
+// some output is still unread in the pipe when the mock exits.
+const burstExitMessageCount = 2000
+
+const burstExitAssistantMsg = `{"type":"assistant","message":{"content":[{"type":"text","text":"burst"}],"model":"claude-3"}}`
+
+// runMockBurstExit answers initialize, writes a burst of assistant messages,
+// and exits without waiting for stdin to close. A reader must still receive
+// every line after the process is reaped.
+func runMockBurstExit() {
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if isControlRequest(line) {
+			fmt.Println(buildControlResponse(extractRequestID(line)))
+			break
+		}
+	}
+	out := bufio.NewWriter(os.Stdout)
+	for i := 0; i < burstExitMessageCount; i++ {
+		_, _ = fmt.Fprintln(out, burstExitAssistantMsg)
+	}
+	_ = out.Flush()
+}
+
+const mockErrorResult = `{"type":"result","subtype":"error_during_execution","duration_ms":1,"duration_api_ms":1,"is_error":true,"num_turns":1,"session_id":"s","total_cost_usd":0}`
+
+// runMockEarlyErrorResult writes an error result before and after answering
+// initialize, so handleStdout routes init errors while Connect still runs.
+func runMockEarlyErrorResult() {
+	fmt.Println(mockErrorResult)
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if isControlRequest(line) {
+			fmt.Println(buildControlResponse(extractRequestID(line)))
+			break
+		}
+	}
+	fmt.Println(mockErrorResult)
+	controlEchoLoop(os.Stdin, os.Stdout)
+}
+
 // controlEchoLoop reads JSON-line stdin and replies to every control_request
 // with a success control_response carrying the matching request_id. Returns
 // when stdin closes.
@@ -294,6 +357,21 @@ func newTransportMockCLIWithControlProtocol(t *testing.T) string {
 func newTransportMockCLIWithStderr(t *testing.T) string {
 	t.Helper()
 	t.Setenv(envMockMode, mockModeWithStderr)
+	return os.Args[0]
+}
+
+// newTransportMockCLIMode returns the test binary configured for mode.
+func newTransportMockCLIMode(t *testing.T, mode string) string {
+	t.Helper()
+	t.Setenv(envMockMode, mode)
+	return os.Args[0]
+}
+
+// newTransportMockCLIBurstExit returns the test binary configured to write a
+// burst of messages after initialize and exit at once.
+func newTransportMockCLIBurstExit(t *testing.T) string {
+	t.Helper()
+	t.Setenv(envMockMode, mockModeBurstExit)
 	return os.Args[0]
 }
 
