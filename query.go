@@ -96,32 +96,28 @@ func (qi *queryIterator) Next(_ context.Context) (Message, error) {
 	if !qi.started {
 		if err := qi.start(); err != nil {
 			qi.mu.Unlock()
+			_ = qi.Close()
 			return nil, err
 		}
 		qi.started = true
 	}
 	qi.mu.Unlock()
 
-	// Read from message channels
+	// Every terminal path closes the transport, so a caller that drains the
+	// iterator without calling Close leaks nothing (Python: finally query.close()).
 	select {
 	case msg, ok := <-qi.msgChan:
 		if !ok {
-			qi.mu.Lock()
-			qi.closed = true
-			qi.mu.Unlock()
+			_ = qi.Close()
 			return nil, ErrNoMoreMessages
 		}
 		qi.maybeEndInputAfterResult(msg)
 		return msg, nil
 	case err := <-qi.errChan:
-		qi.mu.Lock()
-		qi.closed = true
-		qi.mu.Unlock()
+		_ = qi.Close()
 		return nil, err
 	case <-qi.ctx.Done():
-		qi.mu.Lock()
-		qi.closed = true
-		qi.mu.Unlock()
+		_ = qi.Close()
 		return nil, qi.ctx.Err()
 	}
 }

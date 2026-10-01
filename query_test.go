@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -62,6 +63,52 @@ func TestQueryCanUseToolRoutesPermissionPrompts(t *testing.T) {
 			}
 			if toolName == nil || *toolName != "stdio" {
 				t.Fatalf("PermissionPromptToolName = %v, want \"stdio\"", toolName)
+			}
+		})
+	}
+}
+
+// TestQueryClosesTransportAtStreamEnd verifies the iterator closes the
+// transport on every terminal path, so a caller that drains it without Close
+// leaks no process or temp file (Issue #145).
+func TestQueryClosesTransportAtStreamEnd(t *testing.T) {
+	tests := []struct {
+		name      string
+		transport *queryMockTransport
+		wantErr   string
+	}{
+		{name: "drained_to_end", transport: newQueryMockTransport(WithQueryAssistantResponse("done"))},
+		{name: "start_fails_after_connect", transport: newQueryMockTransport(WithQuerySendError(errors.New("write failed"))), wantErr: "write failed"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := setupQueryTestContext(t, 5*time.Second)
+			defer cancel()
+
+			iter, err := QueryWithTransport(ctx, "Hi", test.transport)
+			if err != nil {
+				t.Fatalf("QueryWithTransport() error = %v", err)
+				return
+			}
+			var lastErr error
+			for lastErr == nil {
+				_, lastErr = iter.Next(ctx)
+			}
+			if test.wantErr == "" && !errors.Is(lastErr, ErrNoMoreMessages) {
+				t.Fatalf("Next() error = %v, want ErrNoMoreMessages", lastErr)
+			}
+			if test.wantErr != "" && !strings.Contains(lastErr.Error(), test.wantErr) {
+				t.Fatalf("Next() error = %v, want substring %q", lastErr, test.wantErr)
+			}
+			if got := test.transport.getCloseCalls(); got != 1 {
+				t.Fatalf("transport Close calls = %d, want 1", got)
+			}
+
+			// An explicit Close afterwards stays a no-op.
+			_ = iter.Close()
+			if got := test.transport.getCloseCalls(); got != 1 {
+				t.Fatalf("transport Close calls after iter.Close = %d, want 1", got)
 			}
 		})
 	}
@@ -865,6 +912,7 @@ type queryMockTransport struct {
 	delay            time.Duration
 	optionsReceived  bool
 	endInputCalls    int
+	closeCalls       int
 }
 
 func (q *queryMockTransport) Connect(ctx context.Context) error {
@@ -986,7 +1034,14 @@ func (q *queryMockTransport) Close() error {
 	defer q.mu.Unlock()
 
 	q.connected = false
+	q.closeCalls++
 	return nil
+}
+
+func (q *queryMockTransport) getCloseCalls() int {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	return q.closeCalls
 }
 
 func (q *queryMockTransport) GetValidator() *StreamValidator {
