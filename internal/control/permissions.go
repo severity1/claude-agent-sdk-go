@@ -35,7 +35,7 @@ func (p *Protocol) handleCanUseToolRequest(ctx context.Context, requestID string
 
 	// No callback = deny (secure default)
 	if callback == nil {
-		return p.sendPermissionResponse(ctx, requestID, NewPermissionResultDeny("no permission callback registered"))
+		return p.sendPermissionResponse(ctx, requestID, NewPermissionResultDeny("no permission callback registered"), nil)
 	}
 
 	// Invoke callback synchronously with panic recovery (matches StderrCallback pattern)
@@ -54,19 +54,22 @@ func (p *Protocol) handleCanUseToolRequest(ctx context.Context, requestID string
 		return p.sendErrorResponse(ctx, requestID, fmt.Sprintf("callback error: %v", err))
 	}
 
-	return p.sendPermissionResponse(ctx, requestID, result)
+	return p.sendPermissionResponse(ctx, requestID, result, input)
 }
 
 // sendPermissionResponse sends a permission result back to CLI.
-func (p *Protocol) sendPermissionResponse(ctx context.Context, requestID string, result PermissionResult) error {
+// originalInput is the request input, sent as updatedInput when an allow result has none.
+func (p *Protocol) sendPermissionResponse(ctx context.Context, requestID string, result PermissionResult, originalInput map[string]any) error {
 	// Build response based on result type
 	var responseData map[string]any
 	switch r := result.(type) {
 	case PermissionResultAllow:
-		responseData = map[string]any{"behavior": "allow"}
-		if r.UpdatedInput != nil {
-			responseData["updatedInput"] = r.UpdatedInput
+		// The CLI rejects an allow without updatedInput (Python query.py always sends it).
+		updatedInput := r.UpdatedInput
+		if updatedInput == nil {
+			updatedInput = originalInput
 		}
+		responseData = map[string]any{"behavior": "allow", "updatedInput": updatedInput}
 		if len(r.UpdatedPermissions) > 0 {
 			responseData["updatedPermissions"] = r.UpdatedPermissions
 		}

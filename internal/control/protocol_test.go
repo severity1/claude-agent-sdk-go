@@ -1822,6 +1822,13 @@ func testPermissionAllowCallback(t *testing.T) {
 		t.Fatal("response should be a map")
 	}
 	assertControlEqual(t, "allow", respData["behavior"])
+
+	// The CLI rejects an allow without updatedInput, so nil falls back to the request input (Python parity).
+	updatedInput, ok := respData["updatedInput"].(map[string]any)
+	if !ok {
+		t.Fatalf("updatedInput missing or not a map: %v", respData["updatedInput"])
+	}
+	assertControlEqual(t, "/tmp/test.txt", updatedInput["file_path"])
 }
 
 func testPermissionDenyCallback(t *testing.T) {
