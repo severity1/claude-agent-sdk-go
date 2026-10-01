@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -24,11 +23,8 @@ func TestTransportEnvironmentSetup(t *testing.T) {
 	connectTransportSafely(ctx, t, transport)
 	assertTransportConnected(t, transport, true)
 
-	// Test interrupt (platform-specific signals)
-	if runtime.GOOS != windowsOS {
-		err := transport.Interrupt(ctx)
-		assertNoTransportError(t, err)
-	}
+	err := transport.Interrupt(ctx)
+	assertNoTransportError(t, err)
 }
 
 // TestSubprocessEnvironmentVariables tests environment variable passing to subprocess

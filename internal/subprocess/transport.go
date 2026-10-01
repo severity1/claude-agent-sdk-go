@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"sync"
 	"time"
 
@@ -295,22 +294,21 @@ func (t *Transport) ReceiveMessages(_ context.Context) (<-chan shared.Message, <
 	return t.msgChan, t.errChan
 }
 
-// Interrupt sends an interrupt signal to the subprocess.
-func (t *Transport) Interrupt(_ context.Context) error {
+// Interrupt asks the CLI to stop the current turn with an interrupt control
+// request. The CLI stays alive for the next query (Python: Query.interrupt).
+// A signal would kill the CLI, and Windows has no SIGINT.
+func (t *Transport) Interrupt(ctx context.Context) error {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	if !t.connected || t.cmd == nil || t.cmd.Process == nil {
-		return fmt.Errorf("process not running")
+	if !t.connected {
+		return fmt.Errorf("transport not connected")
+	}
+	if t.protocol == nil {
+		return fmt.Errorf("internal error: transport connected but control protocol is nil")
 	}
 
-	// Windows doesn't support os.Interrupt signal
-	if runtime.GOOS == windowsOS {
-		return fmt.Errorf("interrupt not supported by windows")
-	}
-
-	// Send interrupt signal (Unix/Linux/macOS)
-	return t.cmd.Process.Signal(os.Interrupt)
+	return t.protocol.Interrupt(ctx)
 }
 
 // Close terminates the subprocess connection.

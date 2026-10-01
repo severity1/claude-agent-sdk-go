@@ -36,10 +36,6 @@ func TestTransportProcessManagement(t *testing.T) {
 
 	// Test interrupt handling
 	t.Run("interrupt_handling", func(t *testing.T) {
-		if runtime.GOOS == windowsOS {
-			t.Skip("Interrupt not supported on Windows")
-		}
-
 		transport := setupTransportForTest(t, newTransportMockCLI(t))
 		defer disconnectTransportSafely(t, transport)
 

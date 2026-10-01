@@ -440,7 +440,8 @@ func (c *ClientImpl) ReceiveResponse(_ context.Context) MessageIterator {
 	}
 }
 
-// Interrupt sends an interrupt signal to stop the current operation.
+// Interrupt asks the CLI to stop the current turn. It sends an interrupt
+// control request; the CLI stays connected for the next query.
 func (c *ClientImpl) Interrupt(ctx context.Context) error {
 	// Check context before proceeding
 	if ctx.Err() != nil {

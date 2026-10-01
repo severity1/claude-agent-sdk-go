@@ -657,18 +657,27 @@ func TestTransportInterruptErrorPaths(t *testing.T) {
 		}
 	})
 
-	if runtime.GOOS != windowsOS {
-		t.Run("interrupt_signal_error", func(t *testing.T) {
-			transport := setupTransportForTest(t, newTransportMockCLI(t))
-			defer disconnectTransportSafely(t, transport)
+	// The interrupt travels as a control request, so it works on every OS and
+	// the CLI stays alive (Issue #147). The mock only answers it if it arrives
+	// on stdin as a control_request.
+	t.Run("interrupt_keeps_process_alive", func(t *testing.T) {
+		transport := setupTransportForTest(t, newTransportMockCLI(t))
+		defer disconnectTransportSafely(t, transport)
 
-			connectTransportSafely(ctx, t, transport)
+		connectTransportSafely(ctx, t, transport)
+		assertNoTransportError(t, transport.Interrupt(ctx))
 
-			// Normal interrupt should work
-			err := transport.Interrupt(ctx)
-			assertNoTransportError(t, err)
-		})
-	}
+		transport.mu.RLock()
+		processDone := transport.processDone
+		transport.mu.RUnlock()
+		select {
+		case <-processDone:
+			t.Fatal("Interrupt must not end the CLI process")
+		case <-time.After(200 * time.Millisecond):
+		}
+		assertTransportConnected(t, transport, true)
+		assertNoTransportError(t, transport.Interrupt(ctx))
+	})
 }
 
 // TestTransportControlProtocolIntegration tests that SetModel and SetPermissionMode
