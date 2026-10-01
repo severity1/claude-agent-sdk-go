@@ -1,6 +1,8 @@
 package subprocess
 
 import (
+	"context"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -234,6 +236,30 @@ func TestStderrCallbackHandling(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestStderrCallbackDeliversLinesAfterCancel verifies stderr lines already in
+// the pipe reach the callback after the transport context is cancelled, as in
+// the Python SDK. A failed Connect cancels the context right away.
+func TestStderrCallbackDeliversLinesAfterCancel(t *testing.T) {
+	var received []string
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	transport := &Transport{
+		ctx:        ctx,
+		stderrPipe: io.NopCloser(strings.NewReader("first\nsecond\npartial")),
+		options: &shared.Options{
+			StderrCallback: func(line string) { received = append(received, line) },
+		},
+	}
+
+	transport.wg.Add(1)
+	transport.handleStderrCallback()
+
+	want := []string{"first", "second", "partial"}
+	if strings.Join(received, ",") != strings.Join(want, ",") {
+		t.Fatalf("received %q, want %q", received, want)
 	}
 }
 

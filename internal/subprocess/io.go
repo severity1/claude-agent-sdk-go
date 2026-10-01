@@ -113,13 +113,10 @@ func (t *Transport) handleStderrCallback() {
 
 	scanner := bufio.NewScanner(t.stderrPipe)
 
+	// Deliver every line already written, even after cancellation: Python's
+	// stderr reader never drops a read line. EOF or cleanup closing the pipe
+	// ends the loop.
 	for scanner.Scan() {
-		select {
-		case <-t.ctx.Done():
-			return
-		default:
-		}
-
 		// Strip trailing whitespace (matches Python's rstrip())
 		line := strings.TrimRight(scanner.Text(), " \t\r\n")
 
