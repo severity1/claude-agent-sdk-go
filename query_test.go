@@ -579,6 +579,15 @@ func TestQueryPublicAPI(t *testing.T) {
 	}
 }
 
+// cliNotFoundMessage is the FindCLI error text with no CLI on PATH: Windows recommends the native
+// installer (npm's claude.cmd shim is refused), other platforms first need Node.js.
+func cliNotFoundMessage() string {
+	if runtime.GOOS == windowsOS {
+		return "Install the native claude.exe"
+	}
+	return "Claude Code requires Node.js"
+}
+
 // TestCreateQueryTransport tests the transport creation function
 func TestCreateQueryTransport(t *testing.T) {
 	tests := []struct {
@@ -595,7 +604,7 @@ func TestCreateQueryTransport(t *testing.T) {
 			options:     NewOptions(),
 			setupMock:   setupIsolatedEnvironment, // Isolate PATH to ensure CLI is not found
 			expectError: true,
-			errorMsg:    "Claude Code requires Node.js", // Should get Node.js not found error
+			errorMsg:    cliNotFoundMessage(),
 		},
 		{
 			name:   "cli_not_found_with_options",
@@ -606,7 +615,7 @@ func TestCreateQueryTransport(t *testing.T) {
 			),
 			setupMock:   setupIsolatedEnvironment,
 			expectError: true,
-			errorMsg:    "Claude Code requires Node.js",
+			errorMsg:    cliNotFoundMessage(),
 		},
 		{
 			name:        "empty_prompt_cli_not_found",
@@ -614,7 +623,7 @@ func TestCreateQueryTransport(t *testing.T) {
 			options:     NewOptions(),
 			setupMock:   setupIsolatedEnvironment,
 			expectError: true,
-			errorMsg:    "Claude Code requires Node.js",
+			errorMsg:    cliNotFoundMessage(),
 		},
 		{
 			name:        "nil_options_cli_not_found",
@@ -622,7 +631,7 @@ func TestCreateQueryTransport(t *testing.T) {
 			options:     nil,
 			setupMock:   setupIsolatedEnvironment,
 			expectError: true,
-			errorMsg:    "Claude Code requires Node.js",
+			errorMsg:    cliNotFoundMessage(),
 		},
 	}
 
