@@ -3,8 +3,11 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -362,20 +365,20 @@ func assertPlatformSpecificPaths(t *testing.T, locations []string) {
 	if err != nil {
 		homeDir = "."
 	}
-	expectedNpmGlobal := filepath.Join(homeDir, ".npm-global", "bin", "claude")
+	expected := filepath.Join(homeDir, ".npm-global", "bin", "claude")
 	if runtime.GOOS == windowsOS {
-		expectedNpmGlobal = filepath.Join(homeDir, ".npm-global", "claude.cmd")
+		expected = filepath.Join(homeDir, ".local", "bin", "claude.exe")
 	}
 
 	found := false
 	for _, location := range locations {
-		if location == expectedNpmGlobal {
+		if location == expected {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("Expected npm-global location %s in discovery paths", expectedNpmGlobal)
+		t.Errorf("Expected location %s in discovery paths", expected)
 	}
 }
 
@@ -572,25 +575,11 @@ func TestGetCommonCLILocationsPlatforms(t *testing.T) {
 	if runtime.GOOS == windowsOS {
 		t.Run("windows_paths", func(t *testing.T) {
 			locations := getCommonCLILocations()
-
-			// Check for Windows-specific patterns
-			foundAppData := false
-			foundProgramFiles := false
-
 			for _, location := range locations {
-				if strings.Contains(location, "AppData") && strings.HasSuffix(location, ".cmd") {
-					foundAppData = true
+				// Batch shims run through cmd.exe, so discovery offers only native executables (Python #1127).
+				if !isWindowsNativeExe(location) {
+					t.Errorf("Windows location %q is not a native executable", location)
 				}
-				if strings.Contains(location, "Program Files") && strings.HasSuffix(location, ".cmd") {
-					foundProgramFiles = true
-				}
-			}
-
-			if !foundAppData {
-				t.Error("Expected Windows AppData path with .cmd extension")
-			}
-			if !foundProgramFiles {
-				t.Error("Expected Program Files path with .cmd extension")
 			}
 		})
 	}
@@ -1618,4 +1607,136 @@ func validateSkillsNoop(t *testing.T, cmd []string) {
 	// AllowedTools unchanged; SettingSources stays at the global default (empty).
 	assertContainsArgs(t, cmd, "--allowed-tools", "Read")
 	assertContainsArgs(t, cmd, "--setting-sources", "")
+}
+
+// TestIsWindowsBatchPath pins Python _is_windows_batch_cli: any path component, split on ":", trailing ". " trimmed.
+func TestIsWindowsBatchPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{`claude.cmd`, true},
+		{`claude.bat`, true},
+		{`CLAUDE.CMD`, true},
+		{`C:\Users\x\AppData\Roaming\npm\claude.cmd`, true},
+		{`C:/Users/x/AppData/Roaming/npm/claude.cmd`, true},
+		{`claude.cmd.`, true},
+		{`claude.cmd. . `, true},
+		{`claude.cmd:stream`, true},
+		{`claude:evil.cmd`, true},
+		{`C:claude.cmd`, true},
+		{`.cmd`, true},
+		{`claude.bat\..\claude.exe`, true},
+		{`claude.cmd\...\..`, true},
+		{`C:\tools\claude.exe`, false},
+		{`claude.exe`, false},
+		{`/home/x/.local/bin/claude`, false},
+		{`claude.cmdx`, false},
+		{`C:\cmd\claude.exe`, false},
+		{``, false},
+	}
+	for _, tt := range tests {
+		if got := isWindowsBatchPath(tt.path); got != tt.want {
+			t.Errorf("isWindowsBatchPath(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
+// TestIsWindowsNativeExe pins Python _is_windows_native_exe: final component only.
+func TestIsWindowsNativeExe(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{`C:\Users\x\.local\bin\claude.exe`, true},
+		{`claude.EXE`, true},
+		{`claude.com`, true},
+		{`claude.exe. `, true},
+		{`claude.exe.cmd`, false},
+		{`C:\Users\x\AppData\Roaming\npm\claude.cmd`, false},
+		{`claude`, false},
+		{`C:\claude.exe\claude`, false},
+	}
+	for _, tt := range tests {
+		if got := isWindowsNativeExe(tt.path); got != tt.want {
+			t.Errorf("isWindowsNativeExe(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestRejectWindowsBatchCLI(t *testing.T) {
+	if err := RejectWindowsBatchCLI("linux", `claude.cmd`); err != nil {
+		t.Errorf("linux: unexpected error %v", err)
+	}
+	if err := RejectWindowsBatchCLI("darwin", `C:\npm\claude.bat`); err != nil {
+		t.Errorf("darwin: unexpected error %v", err)
+	}
+	if err := RejectWindowsBatchCLI(windowsOS, `C:\Users\x\.local\bin\claude.exe`); err != nil {
+		t.Errorf("windows exe: unexpected error %v", err)
+	}
+
+	path := `C:\Users\x\AppData\Roaming\npm\claude.cmd`
+	err := RejectWindowsBatchCLI(windowsOS, path)
+	var connErr *shared.ConnectionError
+	if !errors.As(err, &connErr) {
+		t.Fatalf("windows cmd: error = %T %v, want *shared.ConnectionError", err, err)
+	}
+	for _, want := range []string{path, "cmd.exe", "irm https://claude.ai/install.ps1 | iex", "WithCLIPath"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+}
+
+// TestFindOnPath covers the PATH step of FindCLI: on Windows prefer a native claude.exe over a shim.
+func TestFindOnPath(t *testing.T) {
+	const (
+		shim = `C:\npm\claude.cmd`
+		exe  = `C:\Users\x\.local\bin\claude.exe`
+	)
+	lookPath := func(hits map[string]string) func(string) (string, error) {
+		return func(name string) (string, error) {
+			if p, ok := hits[name]; ok {
+				return p, nil
+			}
+			return "", exec.ErrNotFound
+		}
+	}
+	tests := []struct {
+		name           string
+		goos           string
+		hits           map[string]string
+		wantUse        string
+		wantLastResort string
+	}{
+		{"unix_hit", "linux", map[string]string{"claude": "/usr/bin/claude"}, "/usr/bin/claude", ""},
+		{"unix_miss", "linux", map[string]string{}, "", ""},
+		{"windows_native_hit", windowsOS, map[string]string{"claude": exe}, exe, ""},
+		{"windows_shim_and_exe", windowsOS, map[string]string{"claude": shim, "claude.exe": exe}, exe, ""},
+		{"windows_shim_only", windowsOS, map[string]string{"claude": shim}, "", shim},
+		{"windows_exe_probe_is_shim", windowsOS, map[string]string{"claude": shim, "claude.exe": `C:\npm\claude.exe.cmd`}, "", shim},
+		{"windows_miss", windowsOS, map[string]string{}, "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			use, lastResort := findOnPath(tt.goos, lookPath(tt.hits))
+			if use != tt.wantUse || lastResort != tt.wantLastResort {
+				t.Errorf("findOnPath() = (%q, %q), want (%q, %q)", use, lastResort, tt.wantUse, tt.wantLastResort)
+			}
+		})
+	}
+}
+
+func TestCommonCLILocationsWindowsNativeOnly(t *testing.T) {
+	home := filepath.Join("home", "x")
+	locations := commonCLILocations(windowsOS, home)
+	want := []string{filepath.Join(home, ".local", "bin", "claude.exe")}
+	if !reflect.DeepEqual(locations, want) {
+		t.Errorf("windows locations = %v, want %v", locations, want)
+	}
+	for _, location := range commonCLILocations("linux", home) {
+		if isWindowsBatchPath(location) {
+			t.Errorf("linux location %q looks like a batch path", location)
+		}
+	}
 }

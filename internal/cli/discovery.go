@@ -34,14 +34,13 @@ var DiscoveryPaths = []string{
 // FindCLI searches for the Claude CLI binary in standard locations.
 func FindCLI() (string, error) {
 	// 1. Check PATH first - most common case
-	if path, err := exec.LookPath("claude"); err == nil {
+	path, lastResort := findOnPath(runtime.GOOS, exec.LookPath)
+	if path != "" {
 		return path, nil
 	}
 
 	// 2. Check platform-specific common locations
-	locations := getCommonCLILocations()
-
-	for _, location := range locations {
+	for _, location := range getCommonCLILocations() {
 		if info, err := os.Stat(location); err == nil && !info.IsDir() {
 			// Verify it's executable (Unix-like systems)
 			if runtime.GOOS != windowsOS {
@@ -51,6 +50,21 @@ func FindCLI() (string, error) {
 			}
 			return location, nil
 		}
+	}
+
+	// A shim found on PATH goes to Connect, which explains why it refuses to run it.
+	if lastResort != "" {
+		return lastResort, nil
+	}
+
+	// npm's Windows install is a claude.cmd shim, which Connect refuses, so do not recommend it.
+	if runtime.GOOS == windowsOS {
+		return "", shared.NewCLINotFoundError("",
+			"Claude Code not found. Install the native claude.exe with (PowerShell):\n"+
+				"  irm https://claude.ai/install.ps1 | iex\n\n"+
+				"Or specify the path to a claude.exe with WithCLIPath.\n\n"+
+				"(npm install -g @anthropic-ai/claude-code produces a claude.cmd shim, "+
+				"which this SDK refuses to run on Windows.)")
 	}
 
 	// 3. Check Node.js dependency
@@ -71,6 +85,61 @@ func FindCLI() (string, error) {
 			"Or specify the path when creating client")
 }
 
+// findOnPath returns the CLI to use from PATH, or on Windows a non-native hit to keep as a last resort.
+// A shim in an early PATH directory can shadow a native claude.exe in a later one (Python _find_cli).
+func findOnPath(goos string, lookPath func(string) (string, error)) (use, lastResort string) {
+	hit, err := lookPath("claude")
+	if err != nil {
+		return "", ""
+	}
+	if goos != windowsOS || isWindowsNativeExe(hit) {
+		return hit, ""
+	}
+	// PATHEXT can turn the claude.exe probe into "claude.exe.cmd", so check it too.
+	if exe, err := lookPath("claude.exe"); err == nil && isWindowsNativeExe(exe) {
+		return exe, ""
+	}
+	return "", hit
+}
+
+// isWindowsNativeExe reports whether the final path component names a .exe or .com image.
+// It only picks a discovery result; RejectWindowsBatchCLI is the security check.
+func isWindowsNativeExe(path string) bool {
+	components := strings.Split(strings.ReplaceAll(path, `\`, "/"), "/")
+	name := strings.ToLower(strings.TrimRight(components[len(components)-1], ". "))
+	return strings.HasSuffix(name, ".exe") || strings.HasSuffix(name, ".com")
+}
+
+// isWindowsBatchPath reports whether any path component names a .bat or .cmd file.
+// Plain string logic (no filepath) so it gives the same result on every OS. Every component is
+// checked because Win32 path normalization ("..", trailing dots, stream specs) can make any of
+// them the file that runs; no real claude.exe lives under a directory named like a batch file.
+func isWindowsBatchPath(path string) bool {
+	for _, component := range strings.Split(strings.ReplaceAll(path, `\`, "/"), "/") {
+		for _, segment := range strings.Split(component, ":") {
+			name := strings.ToLower(strings.TrimRight(segment, ". "))
+			if strings.HasSuffix(name, ".bat") || strings.HasSuffix(name, ".cmd") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// RejectWindowsBatchCLI refuses a .bat or .cmd CLI path on Windows (Python #1127).
+// Windows runs a batch file through cmd.exe, which re-parses the arguments, and no
+// reliable cmd.exe escaping exists (CVE-2024-27980, "BatBadBut").
+func RejectWindowsBatchCLI(goos, path string) error {
+	if goos != windowsOS || !isWindowsBatchPath(path) {
+		return nil
+	}
+	return shared.NewConnectionError(fmt.Sprintf(
+		"refusing to execute batch script %s: Windows runs .bat/.cmd files via cmd.exe, "+
+			"which can execute commands injected through CLI arguments, and no reliable escaping "+
+			"for cmd.exe exists. Use a native claude executable instead: install Claude Code "+
+			"natively (irm https://claude.ai/install.ps1 | iex), or point WithCLIPath at a claude.exe", path), nil)
+}
+
 // getCommonCLILocations returns platform-specific CLI search locations
 func getCommonCLILocations() []string {
 	homeDir, err := os.UserHomeDir()
@@ -78,30 +147,24 @@ func getCommonCLILocations() []string {
 		// Fallback to current directory if home directory can't be determined
 		homeDir = "."
 	}
+	return commonCLILocations(runtime.GOOS, homeDir)
+}
 
-	var locations []string
-
-	switch runtime.GOOS {
-	case windowsOS:
-		locations = []string{
-			filepath.Join(homeDir, "AppData", "Roaming", "npm", "claude.cmd"),
-			filepath.Join("C:", "Program Files", "nodejs", "claude.cmd"),
-			filepath.Join(homeDir, ".npm-global", "claude.cmd"),
-			filepath.Join(homeDir, "node_modules", ".bin", "claude.cmd"),
-		}
-	default: // Unix-like systems
-		locations = []string{
-			filepath.Join(homeDir, ".npm-global", "bin", "claude"),
-			"/usr/local/bin/claude",
-			filepath.Join(homeDir, ".local", "bin", "claude"),
-			filepath.Join(homeDir, "node_modules", ".bin", "claude"),
-			filepath.Join(homeDir, ".yarn", "bin", "claude"),
-			"/opt/homebrew/bin/claude",       // macOS Homebrew ARM
-			"/usr/local/homebrew/bin/claude", // macOS Homebrew Intel
-		}
+// commonCLILocations returns the CLI search locations for goos.
+func commonCLILocations(goos, homeDir string) []string {
+	if goos == windowsOS {
+		// Only the native installer's claude.exe: npm's claude.cmd shim is refused at Connect.
+		return []string{filepath.Join(homeDir, ".local", "bin", "claude.exe")}
 	}
-
-	return locations
+	return []string{
+		filepath.Join(homeDir, ".npm-global", "bin", "claude"),
+		"/usr/local/bin/claude",
+		filepath.Join(homeDir, ".local", "bin", "claude"),
+		filepath.Join(homeDir, "node_modules", ".bin", "claude"),
+		filepath.Join(homeDir, ".yarn", "bin", "claude"),
+		"/opt/homebrew/bin/claude",       // macOS Homebrew ARM
+		"/usr/local/homebrew/bin/claude", // macOS Homebrew Intel
+	}
 }
 
 // BuildCommand constructs the CLI command with all necessary flags.

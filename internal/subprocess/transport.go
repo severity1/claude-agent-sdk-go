@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 
@@ -123,6 +124,11 @@ func (t *Transport) Connect(ctx context.Context) error {
 
 	if t.connected {
 		return fmt.Errorf("transport already connected")
+	}
+
+	// Before anything spawns the CLI, including the version probe below.
+	if err := cli.RejectWindowsBatchCLI(runtime.GOOS, t.cliPath); err != nil {
+		return err
 	}
 
 	// Generate MCP config file if McpServers are specified
