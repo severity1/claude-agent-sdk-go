@@ -100,6 +100,7 @@ make ci                           # Run full CI pipeline locally
 
 - **Transport interface**: Central abstraction for CLI communication; use `MockTransport` for tests
 - **Process cleanup**: SIGTERM -> wait 5 seconds -> SIGKILL; `startProcessWaiter()` is the sole `cmd.Wait()` caller, started right after `Start()`, and closes `processDone` on exit; `terminateProcess()` never calls `cmd.Wait()`, it waits on `processDone` and no longer treats `stdoutDone` (stdout EOF) as process exit (a CLI that closes stdout but stays alive must still be signaled); child stdout and the stderr callback use `os.Pipe` via `newChildOutputPipe()` instead of `cmd.StdoutPipe/StderrPipe` because `cmd.Wait()` closes those readers and drops buffered output (Python reads stdout to EOF, reaps separately); the `childPipeEnds` write ends are closed in the parent after `Start()`; `isProcessAlreadyFinishedError()` suppresses expected termination errors including Windows `"TerminateProcess: Access is denied"`
+- **Stderr callback delivery**: `handleStderrCallback` never checks `ctx.Done()` inside its scan loop, so lines already read still reach `StderrCallback` after cancel (Python parity: its stderr reader never drops a read line); pinned by `TestStderrCallbackDeliversLinesAfterCancel`
 - **Buffer protection**: 1MB limit to prevent memory exhaustion; `parser.NewWithSize(n)` allows configurable override
 - **Environment variables**: Set `CLAUDE_CODE_ENTRYPOINT` to identify SDK to CLI
 - **Table-driven tests**: Use for complex scenarios with multiple test cases
