@@ -418,7 +418,9 @@ func (c *ClientImpl) ReceiveMessages(_ context.Context) <-chan Message {
 	return msgChan
 }
 
-// ReceiveResponse returns an iterator for the response messages.
+// ReceiveResponse returns an iterator for the messages of the current turn.
+// The iterator returns the ResultMessage, then ErrNoMoreMessages on the next call.
+// Call it again after the next Query to read that turn.
 func (c *ClientImpl) ReceiveResponse(_ context.Context) MessageIterator {
 	// Check connection status with read lock
 	c.mu.RLock()
@@ -600,6 +602,10 @@ func (ci *clientIterator) Next(ctx context.Context) (Message, error) {
 			if !ok {
 				ci.markClosed()
 				return nil, ErrNoMoreMessages
+			}
+			// The turn ends at its ResultMessage (Python receive_response); the channel stays open for the next turn.
+			if _, isResult := msg.(*ResultMessage); isResult {
+				ci.markClosed()
 			}
 			return msg, nil
 		case err, ok := <-errChan:

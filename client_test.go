@@ -3069,3 +3069,76 @@ func testClientGetMcpStatusTransportError(t *testing.T) {
 		t.Errorf("expected transport error, got: %v", err)
 	}
 }
+
+// TestClientIteratorStopsAfterResultMessage pins Python receive_response(): yield up to and including the ResultMessage.
+func TestClientIteratorStopsAfterResultMessage(t *testing.T) {
+	ctx, cancel := setupClientTestContext(t, 5*time.Second)
+	defer cancel()
+
+	msgChan := make(chan Message, 3)
+	msgChan <- &AssistantMessage{Content: []ContentBlock{&TextBlock{Text: "first"}}}
+	msgChan <- &ResultMessage{SessionID: "s1"}
+	msgChan <- &AssistantMessage{Content: []ContentBlock{&TextBlock{Text: "next turn"}}}
+	iter := &clientIterator{msgChan: msgChan, errChan: make(chan error)}
+
+	if msg, err := iter.Next(ctx); err != nil {
+		t.Fatalf("first Next: %v", err)
+	} else if _, ok := msg.(*AssistantMessage); !ok {
+		t.Fatalf("first Next = %T, want *AssistantMessage", msg)
+	}
+	if msg, err := iter.Next(ctx); err != nil {
+		t.Fatalf("second Next: %v", err)
+	} else if _, ok := msg.(*ResultMessage); !ok {
+		t.Fatalf("second Next = %T, want *ResultMessage", msg)
+	}
+	if msg, err := iter.Next(ctx); !errors.Is(err, ErrNoMoreMessages) {
+		t.Fatalf("Next after ResultMessage = (%T, %v), want ErrNoMoreMessages", msg, err)
+	}
+	if got := len(msgChan); got != 1 {
+		t.Errorf("iterator consumed the next turn: %d messages left in channel, want 1", got)
+	}
+}
+
+// TestClientReceiveResponseMultiTurn verifies each ReceiveResponse ends at its own turn's ResultMessage.
+func TestClientReceiveResponseMultiTurn(t *testing.T) {
+	ctx, cancel := setupClientTestContext(t, 5*time.Second)
+	defer cancel()
+
+	transport := newClientMockTransport()
+	client := setupClientForTest(t, transport)
+	defer disconnectClientSafely(t, client)
+	connectClientSafely(ctx, t, client)
+
+	for turn := 1; turn <= 2; turn++ {
+		text := fmt.Sprintf("answer %d", turn)
+		assertNoError(t, client.Query(ctx, fmt.Sprintf("question %d", turn)))
+		transport.injectTestMessage(&AssistantMessage{Content: []ContentBlock{&TextBlock{Text: text}}})
+		transport.injectTestMessage(&ResultMessage{SessionID: "s1"})
+
+		iter := client.ReceiveResponse(ctx)
+		var got []Message
+		for {
+			msg, err := iter.Next(ctx)
+			if errors.Is(err, ErrNoMoreMessages) {
+				break
+			}
+			if err != nil {
+				t.Fatalf("turn %d: Next: %v", turn, err)
+			}
+			got = append(got, msg)
+		}
+		if len(got) != 2 {
+			t.Fatalf("turn %d: got %d messages, want 2", turn, len(got))
+		}
+		assistant, ok := got[0].(*AssistantMessage)
+		if !ok {
+			t.Fatalf("turn %d: first message = %T, want *AssistantMessage", turn, got[0])
+		}
+		if tb, ok := assistant.Content[0].(*TextBlock); !ok || tb.Text != text {
+			t.Errorf("turn %d: text = %v, want %q", turn, assistant.Content[0], text)
+		}
+		if _, ok := got[1].(*ResultMessage); !ok {
+			t.Errorf("turn %d: last message = %T, want *ResultMessage", turn, got[1])
+		}
+	}
+}
