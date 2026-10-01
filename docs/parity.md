@@ -6,7 +6,7 @@ This document compares the public API of the Go Agent SDK with the Python Agent 
 
 ## Executive Summary
 
-**Status: partial parity. Work continues row by row.**
+**Goal: 100% parity with the Python SDK, using idiomatic Go. Current status: partial, tracked row by row.**
 
 The Go SDK (`github.com/severity1/claude-agent-sdk-go`) covers the core Python SDK (`claude-agent-sdk`) surface: one-shot queries, the streaming client, hooks, permission callbacks, in-process MCP servers, programmatic agents, and session listing. The Python SDK continues to add features, and some of them are not in Go yet.
 

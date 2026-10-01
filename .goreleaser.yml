@@ -77,7 +77,7 @@ release:
   footer: |
     ## SDK Release Notes
 
-    This Go SDK ports the Python Claude Agent SDK with idiomatic Go patterns. Parity is tracked per Python PR in [docs/parity.md](https://github.com/severity1/claude-agent-sdk-go/blob/{{ .Tag }}/docs/parity.md).
+    This Go SDK aims for 100% parity with the Python Claude Agent SDK, using idiomatic Go patterns. Progress is tracked per Python PR in [docs/parity.md](https://github.com/severity1/claude-agent-sdk-go/blob/{{ .Tag }}/docs/parity.md).
 
     **Full Changelog**: https://github.com/severity1/claude-agent-sdk-go/compare/{{ .PreviousTag }}...{{ .Tag }}
 

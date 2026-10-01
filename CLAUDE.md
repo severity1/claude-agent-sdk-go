@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 <!-- AUTO-MANAGED: project-description -->
 ## Overview
 
-**Claude Agent SDK for Go** - Unofficial Go SDK for Claude Code CLI integration. Provides programmatic interaction through `Query()` (one-shot) and `Client` (streaming) APIs, tracking Python SDK parity (see docs/parity.md and docs/tracking/).
+**Claude Agent SDK for Go** - Unofficial Go SDK for Claude Code CLI integration. Provides programmatic interaction through `Query()` (one-shot) and `Client` (streaming) APIs. Aims for 100% Python SDK parity with idiomatic Go (progress: docs/parity.md and docs/tracking/).
 
 - **Module**: `github.com/severity1/claude-agent-sdk-go`
 - **Package**: `claudecode`
