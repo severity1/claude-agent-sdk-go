@@ -17,7 +17,7 @@ Parity is tracked one Python PR at a time:
 
 Each row in those files has a Go status (`done`, `partial`, `pending`, or `n/a`). This document gives the overview. The tracker rows are the source of truth.
 
-Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (a5535fb, Oct 1, 2026).
+Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (58cf570, v0.7.1, Oct 1, 2026).
 
 | Category | Python SDK | Go SDK | Notes |
 |:---------|:-----------|:-------|:------|
@@ -132,8 +132,8 @@ Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (a
 | `skills` | `WithSkills(skills)`, `WithSkillsAll()`, `WithSkillsList(names...)`, `WithSkillsDisabled()` | PARTIAL (post-snapshot P1) |
 | `env` | `WithEnv(env)` | PARITY |
 | - | `WithEnvVar(key, value)` | GO EXTRA |
-| `extra_args` | `WithExtraArgs(args)` | PARITY |
-| `cli_path` | `WithCLIPath(path)` | PARITY |
+| `extra_args` | `WithExtraArgs(args)` | PARTIAL (a value that starts with `-` is not sent as `--flag=value`; post-snapshot P32 deferred item a) |
+| `cli_path` | `WithCLIPath(path)` | PARITY (a `.bat`/`.cmd` path is refused on Windows; post-snapshot P32) |
 | `max_buffer_size` | `WithMaxBufferSize(size)` | PARITY |
 | `stderr` | `WithStderrCallback(callback)` | PARITY |
 | `debug_stderr` (deprecated) | `WithDebugWriter(w)` | PARITY |
