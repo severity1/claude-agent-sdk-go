@@ -436,7 +436,7 @@ func (c *ClientImpl) ReceiveResponse(ctx context.Context) MessageIterator
 
 #### `Interrupt()`
 
-Send interrupt signal to stop current operation.
+Ask the CLI to stop the current turn. Sends an `interrupt` control request (Python `interrupt()`); the CLI stays connected for the next query, and it works on every OS.
 
 ```go
 func (c *ClientImpl) Interrupt(ctx context.Context) error
