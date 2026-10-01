@@ -181,3 +181,91 @@ func TestTransportSlowPermissionCallbackDoesNotBlockReader(t *testing.T) {
 		t.Fatal("slow callback never ran")
 	}
 }
+
+// TestTransportReportsCLIExit verifies a CLI that exits non-zero after
+// connecting is visible to the caller (Issue #144, Python ProcessError):
+// errChan yields a *ProcessError, IsConnected turns false, and SendMessage
+// returns a *ConnectionError.
+func TestTransportReportsCLIExit(t *testing.T) {
+	tests := []struct {
+		name         string
+		mode         string
+		wantExitCode int
+		wantMessage  string
+	}{
+		{"crash_after_output", mockModeExitNonZero, mockCrashExitCode, "exited unexpectedly"},
+		// The CLI exits 1 on purpose after an error result (Python #918).
+		{"exit_after_error_result", mockModeErrorResultExit, 1, "Claude Code returned an error result: max turns reached"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := setupTransportTestContext(t, 30*time.Second)
+			defer cancel()
+
+			transport := New(newTransportMockCLIMode(t, test.mode), &shared.Options{}, "sdk-go")
+			t.Cleanup(func() { _ = transport.Close() })
+			connectTransportSafely(ctx, t, transport)
+
+			msgChan, errChan := transport.ReceiveMessages(ctx)
+			var processErr *shared.ProcessError
+			for msgChan != nil || errChan != nil {
+				select {
+				case _, ok := <-msgChan:
+					if !ok {
+						msgChan = nil
+					}
+				case err, ok := <-errChan:
+					if !ok {
+						errChan = nil
+						continue
+					}
+					if !errors.As(err, &processErr) {
+						t.Fatalf("errChan error = %v (%T), want *ProcessError", err, err)
+					}
+				case <-ctx.Done():
+					t.Fatal("stream did not end after the CLI exited")
+					return
+				}
+			}
+
+			if processErr == nil {
+				t.Fatal("no *ProcessError reported for a non-zero CLI exit")
+				return
+			}
+			if processErr.ExitCode != test.wantExitCode {
+				t.Errorf("ExitCode = %d, want %d", processErr.ExitCode, test.wantExitCode)
+			}
+			if !strings.Contains(processErr.Error(), test.wantMessage) {
+				t.Errorf("error = %q, want substring %q", processErr.Error(), test.wantMessage)
+			}
+			if transport.IsConnected() {
+				t.Error("IsConnected() = true after the CLI exited")
+			}
+			var connErr *shared.ConnectionError
+			if err := transport.SendMessage(ctx, shared.StreamMessage{Type: "user"}); !errors.As(err, &connErr) {
+				t.Errorf("SendMessage after exit = %v, want *ConnectionError", err)
+			}
+		})
+	}
+}
+
+// TestTransportCloseReportsNoProcessError verifies the SDK's own shutdown is
+// not reported as a CLI crash.
+func TestTransportCloseReportsNoProcessError(t *testing.T) {
+	ctx, cancel := setupTransportTestContext(t, 30*time.Second)
+	defer cancel()
+
+	transport := New(newTransportMockCLI(t), &shared.Options{}, "sdk-go")
+	connectTransportSafely(ctx, t, transport)
+	_, errChan := transport.ReceiveMessages(ctx)
+	if err := transport.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	for err := range errChan {
+		var processErr *shared.ProcessError
+		if errors.As(err, &processErr) {
+			t.Fatalf("Close reported a ProcessError: %v", err)
+		}
+	}
+}

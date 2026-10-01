@@ -100,7 +100,20 @@ func newParser(options *shared.Options) *parser.Parser {
 func (t *Transport) IsConnected() bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.connected && t.cmd != nil && t.cmd.Process != nil
+	return t.connected && t.cmd != nil && t.cmd.Process != nil && !t.processExitedLocked()
+}
+
+// processExitedLocked reports whether the CLI process has exited. Callers hold t.mu.
+func (t *Transport) processExitedLocked() bool {
+	if t.processDone == nil {
+		return false
+	}
+	select {
+	case <-t.processDone:
+		return true
+	default:
+		return false
+	}
 }
 
 // Connect starts the Claude CLI subprocess.
@@ -170,7 +183,7 @@ func (t *Transport) Connect(ctx context.Context) error {
 
 	// Start I/O handling goroutines
 	t.wg.Add(1)
-	go t.handleStdout(t.protocol)
+	go t.handleStdout(t.protocol, childProcess{cmd: t.cmd, done: t.processDone})
 
 	// Start stderr callback goroutine if callback is configured
 	if t.stderrPipe != nil && t.options != nil && t.options.StderrCallback != nil {
@@ -235,6 +248,10 @@ func (t *Transport) SendMessage(ctx context.Context, message shared.StreamMessag
 
 	if !t.connected || t.stdin == nil {
 		return fmt.Errorf("transport not connected or stdin closed")
+	}
+	if t.processExitedLocked() {
+		return shared.NewConnectionError(
+			fmt.Sprintf("cannot write to terminated CLI process (%s)", t.cmd.ProcessState), nil)
 	}
 
 	// Check context cancellation

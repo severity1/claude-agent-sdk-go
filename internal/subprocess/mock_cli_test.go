@@ -59,6 +59,8 @@ const (
 	mockModeHangInit            = "hang_init"
 	mockModeEarlyErrorResult    = "early_error_result"
 	mockModeTwoPermissionReqs   = "two_permission_requests"
+	mockModeExitNonZero         = "exit_nonzero"
+	mockModeErrorResultExit     = "error_result_exit"
 )
 
 // runMockCLI dispatches to per-mode handlers. Kept thin so gocyclo stays low.
@@ -102,6 +104,14 @@ func runMockCLI(mode string) {
 		runMockEarlyErrorResult()
 	case mockModeTwoPermissionReqs:
 		runMockTwoPermissionRequests()
+	case mockModeExitNonZero:
+		answerInitialize()
+		fmt.Println(burstExitAssistantMsg)
+		os.Exit(mockCrashExitCode)
+	case mockModeErrorResultExit:
+		answerInitialize()
+		fmt.Println(`{"type":"result","subtype":"error_max_turns","duration_ms":1,"duration_api_ms":1,"is_error":true,"num_turns":1,"session_id":"s","total_cost_usd":0,"errors":["max turns reached"]}`)
+		os.Exit(1)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown mock CLI mode: %s\n", mode)
 		os.Exit(2)
@@ -298,6 +308,22 @@ func runMockTwoPermissionRequests() {
 		)
 	}
 	controlEchoLoop(os.Stdin, os.Stdout)
+}
+
+// mockCrashExitCode is the exit code of the exit_nonzero mode.
+const mockCrashExitCode = 3
+
+// answerInitialize answers the first control request (initialize) and returns.
+func answerInitialize() {
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if isControlRequest(line) {
+			fmt.Println(buildControlResponse(extractRequestID(line)))
+			return
+		}
+	}
 }
 
 // controlEchoLoop reads JSON-line stdin and replies to every control_request

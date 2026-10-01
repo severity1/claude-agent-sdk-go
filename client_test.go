@@ -407,6 +407,52 @@ func TestClientCanUseToolReconnectAndConflict(t *testing.T) {
 	}
 }
 
+// TestIteratorsTreatClosedErrChanAsNoError verifies a closed error channel
+// does not make Next return (nil, nil) or skip buffered messages (Issue #144).
+// The transport closes errChan before msgChan when the CLI exits.
+func TestIteratorsTreatClosedErrChanAsNoError(t *testing.T) {
+	newChannels := func() (chan Message, chan error) {
+		msgChan := make(chan Message, 2)
+		msgChan <- &AssistantMessage{Model: "claude-3"}
+		msgChan <- &AssistantMessage{Model: "claude-3"}
+		close(msgChan)
+		errChan := make(chan error)
+		close(errChan)
+		return msgChan, errChan
+	}
+	drain := func(t *testing.T, iter MessageIterator) {
+		t.Helper()
+		ctx, cancel := setupClientTestContext(t, 5*time.Second)
+		defer cancel()
+		for i := 0; i < 2; i++ {
+			msg, err := iter.Next(ctx)
+			if err != nil || msg == nil {
+				t.Fatalf("Next() #%d = (%v, %v), want a message", i+1, msg, err)
+			}
+		}
+		if _, err := iter.Next(ctx); !errors.Is(err, ErrNoMoreMessages) {
+			t.Fatalf("Next() after drain error = %v, want ErrNoMoreMessages", err)
+		}
+	}
+
+	t.Run("client_iterator", func(t *testing.T) {
+		msgChan, errChan := newChannels()
+		streamErrChan := make(chan error)
+		close(streamErrChan)
+		drain(t, &clientIterator{msgChan: msgChan, errChan: errChan, streamErrChan: streamErrChan})
+	})
+	t.Run("query_iterator", func(t *testing.T) {
+		msgChan, errChan := newChannels()
+		drain(t, &queryIterator{
+			transport: newQueryMockTransport(),
+			ctx:       context.Background(),
+			started:   true,
+			msgChan:   msgChan,
+			errChan:   errChan,
+		})
+	})
+}
+
 // TestClientReceiveMessages tests message reception through client channels
 // Covers T137: Client Message Reception
 func TestClientReceiveMessages(t *testing.T) {

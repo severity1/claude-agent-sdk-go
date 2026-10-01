@@ -2,10 +2,12 @@ package subprocess
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/severity1/claude-agent-sdk-go/internal/control"
@@ -13,21 +15,58 @@ import (
 	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
 
-// handleStdout processes stdout in a separate goroutine. protocol is passed in
-// because teardownLocked clears t.protocol while this goroutine may still run.
-func (t *Transport) handleStdout(protocol *control.Protocol) {
+// childProcess is the CLI process that handleStdout watches. Captured at
+// Connect so cleanup clearing t.cmd cannot race with the reader.
+type childProcess struct {
+	cmd  *exec.Cmd
+	done <-chan struct{} // closed after the sole cmd.Wait returns
+}
+
+// exitError waits for the CLI to exit after stdout EOF. It returns a
+// ProcessError for a non-zero exit, and nil for a clean exit or when the SDK
+// itself shut the CLI down (Python: ProcessError after read_messages ends).
+func (c childProcess) exitError(ctx context.Context, lastErrorResult string) error {
+	if c.cmd == nil || c.done == nil {
+		return nil
+	}
+	select {
+	case <-c.done:
+	case <-ctx.Done():
+		return nil
+	}
+	// teardown cancels ctx before it signals the CLI, so a set ctx means our kill.
+	if ctx.Err() != nil || c.cmd.ProcessState == nil || c.cmd.ProcessState.Success() {
+		return nil
+	}
+	state := c.cmd.ProcessState
+	message := fmt.Sprintf("Claude Code process exited unexpectedly (%s)", state)
+	if lastErrorResult != "" {
+		// The CLI exits non-zero on purpose after an error result; that result
+		// is the actionable error (Python #918).
+		message = "Claude Code returned an error result: " + lastErrorResult
+	}
+	return shared.NewProcessError(message, state.ExitCode(), "Check stderr output for details")
+}
+
+// handleStdout processes stdout in a separate goroutine. protocol and child
+// are passed in because teardownLocked clears t.protocol and t.cmd while this
+// goroutine may still run.
+func (t *Transport) handleStdout(protocol *control.Protocol, child childProcess) {
 	defer t.wg.Done()
 	defer close(t.msgChan)
 	defer close(t.errChan)
 	defer t.validator.MarkStreamEnd() // Mark stream end for validation
 	// Capture channel locally so reassignment on a subsequent Connect()
-	// doesn't race with this defer.
+	// doesn't race with this goroutine. It closes at stdout EOF, before the
+	// wait for the process exit, so the init watcher sees EOF at once.
 	stdoutDone := t.stdoutDone
-	defer func() {
+	signalStdoutDone := func() {
 		if stdoutDone != nil {
 			close(stdoutDone)
+			stdoutDone = nil
 		}
-	}()
+	}
+	defer signalStdoutDone()
 
 	scanner := bufio.NewScanner(t.stdout)
 
@@ -40,68 +79,96 @@ func (t *Transport) handleStdout(protocol *control.Protocol) {
 	buf := make([]byte, scanTokenSize)
 	scanner.Buffer(buf, scanTokenSize)
 
+	var lastErrorResult string
 	for scanner.Scan() {
-		select {
-		case <-t.ctx.Done():
+		if t.ctx.Err() != nil {
 			return
-		default:
 		}
-
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-
-		// Parse line with the parser
-		messages, err := t.parser.ProcessLine(line)
-		if err != nil {
-			select {
-			case t.errChan <- err:
-			case <-t.ctx.Done():
-				return
-			}
-			continue
-		}
-
-		// Send parsed messages and track for validation
-		for _, msg := range messages {
-			if msg == nil {
-				continue
-			}
-
-			// If this is an error ResultMessage before we're fully connected,
-			// it means the CLI failed during init (e.g., invalid session ID).
-			// Route the error to the control protocol to unblock Initialize().
-			routeInitError(protocol, msg)
-
-			// Check if this is a control message that should be routed to the protocol
-			if rawCtrl, ok := msg.(*shared.RawControlMessage); ok {
-				// Route control messages to the protocol for request/response correlation
-				if protocol != nil {
-					// Control requests run on their own goroutine so a slow callback
-					// cannot stall this reader; responses route inline.
-					_ = protocol.HandleIncomingMessageAsync(t.ctx, rawCtrl.Data)
-				}
-				// Don't send control messages to msgChan - they're internal to the protocol
-				continue
-			}
-
-			// Track regular message for stream validation
-			t.validator.TrackMessage(msg)
-
-			select {
-			case t.msgChan <- msg:
-			case <-t.ctx.Done():
-				return
-			}
+		if !t.processStdoutLine(protocol, scanner.Text(), &lastErrorResult) {
+			return
 		}
 	}
 
+	signalStdoutDone()
 	if err := scanner.Err(); err != nil {
-		select {
-		case t.errChan <- fmt.Errorf("stdout scanner error: %w", err):
-		case <-t.ctx.Done():
+		t.sendStreamError(fmt.Errorf("stdout scanner error: %w", err))
+		return
+	}
+	if err := child.exitError(t.ctx, lastErrorResult); err != nil {
+		t.sendStreamError(err)
+	}
+}
+
+// processStdoutLine parses one stdout line and routes its messages. It
+// returns false when the transport context is done.
+func (t *Transport) processStdoutLine(protocol *control.Protocol, line string, lastErrorResult *string) bool {
+	if line == "" {
+		return true
+	}
+
+	messages, err := t.parser.ProcessLine(line)
+	if err != nil {
+		return t.sendStreamError(err)
+	}
+
+	for _, msg := range messages {
+		if msg == nil {
+			continue
 		}
+
+		// An error ResultMessage before initialize completes means the CLI
+		// failed during init (e.g. invalid session ID); unblock Initialize().
+		routeInitError(protocol, msg)
+
+		if rawCtrl, ok := msg.(*shared.RawControlMessage); ok {
+			if protocol != nil {
+				// Control requests run on their own goroutine so a slow callback
+				// cannot stall this reader; responses route inline.
+				_ = protocol.HandleIncomingMessageAsync(t.ctx, rawCtrl.Data)
+			}
+			continue
+		}
+
+		*lastErrorResult = trackErrorResult(*lastErrorResult, msg)
+		t.validator.TrackMessage(msg)
+
+		select {
+		case t.msgChan <- msg:
+		case <-t.ctx.Done():
+			return false
+		}
+	}
+	return true
+}
+
+// trackErrorResult returns the error text of the latest error result, or ""
+// once the conversation moves on (Python #918 reset rule).
+func trackErrorResult(current string, msg shared.Message) string {
+	switch m := msg.(type) {
+	case *shared.ResultMessage:
+		if !m.IsError {
+			return ""
+		}
+		if len(m.Errors) > 0 {
+			return strings.Join(m.Errors, "; ")
+		}
+		return m.Subtype
+	case *shared.SystemMessage:
+		if m.Subtype == "session_state_changed" {
+			return current
+		}
+	}
+	return ""
+}
+
+// sendStreamError delivers err to errChan. It returns false when the
+// transport context is done.
+func (t *Transport) sendStreamError(err error) bool {
+	select {
+	case t.errChan <- err:
+		return true
+	case <-t.ctx.Done():
+		return false
 	}
 }
 

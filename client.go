@@ -382,10 +382,11 @@ func (c *ClientImpl) QueryStream(ctx context.Context, messages <-chan StreamMess
 					return // Channel closed
 				}
 				if err := transport.SendMessage(ctx, msg); err != nil {
-					fmt.Fprintf(os.Stderr, "claude-agent-sdk: QueryStream send error: %v\n", err)
+					// ReceiveResponse returns this error; log only if it is dropped.
 					select {
 					case streamErrChan <- fmt.Errorf("stream send error: %w", err):
 					default:
+						fmt.Fprintf(os.Stderr, "claude-agent-sdk: QueryStream send error dropped: %v\n", err)
 					}
 					return
 				}
@@ -590,31 +591,42 @@ func (ci *clientIterator) Next(ctx context.Context) (Message, error) {
 	}
 	ci.mu.Unlock()
 
-	select {
-	case msg, ok := <-ci.msgChan:
-		if !ok {
-			ci.mu.Lock()
-			ci.closed = true
-			ci.mu.Unlock()
-			return nil, ErrNoMoreMessages
+	// A closed error channel only means "no more errors": nil it for this
+	// call so it neither returns (nil, nil) nor wins over buffered messages.
+	errChan, streamErrChan := ci.errChan, ci.streamErrChan
+	for {
+		select {
+		case msg, ok := <-ci.msgChan:
+			if !ok {
+				ci.markClosed()
+				return nil, ErrNoMoreMessages
+			}
+			return msg, nil
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil
+				continue
+			}
+			ci.markClosed()
+			return nil, err
+		case err, ok := <-streamErrChan:
+			if !ok {
+				streamErrChan = nil
+				continue
+			}
+			ci.markClosed()
+			return nil, err
+		case <-ctx.Done():
+			ci.markClosed()
+			return nil, ctx.Err()
 		}
-		return msg, nil
-	case err := <-ci.errChan:
-		ci.mu.Lock()
-		ci.closed = true
-		ci.mu.Unlock()
-		return nil, err
-	case err := <-ci.streamErrChan:
-		ci.mu.Lock()
-		ci.closed = true
-		ci.mu.Unlock()
-		return nil, err
-	case <-ctx.Done():
-		ci.mu.Lock()
-		ci.closed = true
-		ci.mu.Unlock()
-		return nil, ctx.Err()
 	}
+}
+
+func (ci *clientIterator) markClosed() {
+	ci.mu.Lock()
+	ci.closed = true
+	ci.mu.Unlock()
 }
 
 func (ci *clientIterator) Close() error {

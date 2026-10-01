@@ -105,20 +105,28 @@ func (qi *queryIterator) Next(_ context.Context) (Message, error) {
 
 	// Every terminal path closes the transport, so a caller that drains the
 	// iterator without calling Close leaks nothing (Python: finally query.close()).
-	select {
-	case msg, ok := <-qi.msgChan:
-		if !ok {
+	// A closed errChan only means "no more errors", so keep reading msgChan.
+	errChan := qi.errChan
+	for {
+		select {
+		case msg, ok := <-qi.msgChan:
+			if !ok {
+				_ = qi.Close()
+				return nil, ErrNoMoreMessages
+			}
+			qi.maybeEndInputAfterResult(msg)
+			return msg, nil
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil
+				continue
+			}
 			_ = qi.Close()
-			return nil, ErrNoMoreMessages
+			return nil, err
+		case <-qi.ctx.Done():
+			_ = qi.Close()
+			return nil, qi.ctx.Err()
 		}
-		qi.maybeEndInputAfterResult(msg)
-		return msg, nil
-	case err := <-qi.errChan:
-		_ = qi.Close()
-		return nil, err
-	case <-qi.ctx.Done():
-		_ = qi.Close()
-		return nil, qi.ctx.Err()
 	}
 }
 
