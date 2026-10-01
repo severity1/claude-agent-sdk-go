@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -3140,5 +3141,51 @@ func TestClientReceiveResponseMultiTurn(t *testing.T) {
 		if _, ok := got[1].(*ResultMessage); !ok {
 			t.Errorf("turn %d: last message = %T, want *ResultMessage", turn, got[1])
 		}
+	}
+}
+
+// TestValidateWindowsArgValue pins Python _reject_windows_cmd_metacharacters: Windows only, cmd.exe metacharacters and CR/LF.
+func TestValidateWindowsArgValue(t *testing.T) {
+	tests := []struct {
+		name    string
+		goos    string
+		value   string
+		wantErr bool
+	}{
+		{"windows_uuid", "windows", "550e8400-e29b-41d4-a716-446655440000", false},
+		{"windows_title_with_space", "windows", "my session title", false},
+		{"windows_dash_value", "windows", "--version", false},
+		{"windows_ampersand", "windows", "abc & calc.exe", true},
+		{"windows_pipe", "windows", "a|b", true},
+		{"windows_redirect_in", "windows", "a<b", true},
+		{"windows_redirect_out", "windows", "a>b", true},
+		{"windows_caret", "windows", "a^b", true},
+		{"windows_percent", "windows", "%PATH%", true},
+		{"windows_bang", "windows", "!x!", true},
+		{"windows_quote", "windows", `a"b`, true},
+		{"windows_cr", "windows", "a\rb", true},
+		{"windows_lf", "windows", "a\nb", true},
+		{"linux_metacharacters_allowed", "linux", `a&|<>^%!"b`, false},
+		{"darwin_newline_allowed", "darwin", "a\nb", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateWindowsArgValue(tt.goos, "resume", tt.value)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateWindowsArgValue(%q, %q) error = %v, wantErr %v", tt.goos, tt.value, err, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "resume") {
+				t.Errorf("error %q does not name the option", err)
+			}
+		})
+	}
+}
+
+// TestPrepareOptionsResumeMetacharacters covers the call site: only Windows rejects the value.
+func TestPrepareOptionsResumeMetacharacters(t *testing.T) {
+	resume := "abc & calc.exe"
+	err := prepareOptions(&Options{Resume: &resume})
+	if wantErr := runtime.GOOS == windowsOS; (err != nil) != wantErr {
+		t.Fatalf("prepareOptions(Resume=%q) on %s: error = %v, wantErr %v", resume, runtime.GOOS, err, wantErr)
 	}
 }

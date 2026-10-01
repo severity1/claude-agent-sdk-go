@@ -1224,7 +1224,7 @@ func setupIsolatedEnvironment(t *testing.T) func() {
 	originalHome := os.Getenv("HOME")
 	originalPath := os.Getenv("PATH")
 
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		originalHome = os.Getenv("USERPROFILE")
 		_ = os.Setenv("USERPROFILE", tempHome)
 	} else {
@@ -1233,7 +1233,7 @@ func setupIsolatedEnvironment(t *testing.T) func() {
 	_ = os.Setenv("PATH", "/nonexistent/path")
 
 	return func() {
-		if runtime.GOOS == "windows" {
+		if runtime.GOOS == windowsOS {
 			_ = os.Setenv("USERPROFILE", originalHome)
 		} else {
 			_ = os.Setenv("HOME", originalHome)

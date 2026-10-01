@@ -420,7 +420,7 @@ func validateFullOptionsCommand(t *testing.T, cmd []string) {
 	assertContainsArgs(t, cmd, "--system-prompt", "You are a helpful assistant")
 	assertContainsArgs(t, cmd, "--model", "claude-3-sonnet")
 	assertContainsArg(t, cmd, "--continue")
-	assertContainsArgs(t, cmd, "--resume", "session123")
+	assertContainsArg(t, cmd, "--resume=session123")
 	assertContainsArg(t, cmd, "--custom-flag")
 	assertContainsArgs(t, cmd, "--with-value", "test")
 }
@@ -858,6 +858,11 @@ func TestSessionManagementFlagsSupport(t *testing.T) {
 			},
 			validate: validateForkSessionWithResume,
 		},
+		{
+			name:     "resume_value_starting_with_dash",
+			options:  &shared.Options{Resume: stringPtr("--version")},
+			validate: validateResumeDashValue,
+		},
 	}
 
 	for _, test := range tests {
@@ -900,9 +905,17 @@ func validateSettingSourcesEmpty(t *testing.T, cmd []string) {
 
 func validateForkSessionWithResume(t *testing.T, cmd []string) {
 	t.Helper()
-	assertContainsArgs(t, cmd, "--resume", "session-123")
+	assertContainsArg(t, cmd, "--resume=session-123")
 	assertContainsArg(t, cmd, "--fork-session")
 	assertContainsArgs(t, cmd, "--setting-sources", "user")
+}
+
+// A dash-leading resume value must stay bound to --resume, not parse as its own flag (Python #1123).
+func validateResumeDashValue(t *testing.T, cmd []string) {
+	t.Helper()
+	assertContainsArg(t, cmd, "--resume=--version")
+	assertNotContainsArg(t, cmd, "--resume")
+	assertNotContainsArg(t, cmd, "--version")
 }
 
 // TestPluginsFlagSupport tests --plugin-dir CLI flag generation

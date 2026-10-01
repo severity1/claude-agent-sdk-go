@@ -217,7 +217,8 @@ func addSessionFlags(cmd []string, options *shared.Options) []string {
 		cmd = append(cmd, "--continue")
 	}
 	if options.Resume != nil {
-		cmd = append(cmd, "--resume", *options.Resume)
+		// One token: the CLI's --resume takes an optional value, so a dash-leading value would parse as a flag.
+		cmd = append(cmd, "--resume="+*options.Resume)
 	}
 	if options.MaxTurns > 0 {
 		cmd = append(cmd, "--max-turns", fmt.Sprintf("%d", options.MaxTurns))

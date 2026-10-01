@@ -4,12 +4,18 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/severity1/claude-agent-sdk-go/internal/subprocess"
 )
 
-const defaultSessionID = "default"
+const (
+	defaultSessionID = "default"
+	windowsOS        = "windows"
+)
 
 // Client provides bidirectional streaming communication with Claude Code CLI.
 type Client interface {
@@ -209,6 +215,12 @@ func prepareOptions(options *Options) error {
 		}
 	}
 
+	if options.Resume != nil {
+		if err := validateWindowsArgValue(runtime.GOOS, "resume", *options.Resume); err != nil {
+			return err
+		}
+	}
+
 	// Validate max turns
 	if options.MaxTurns < 0 {
 		return fmt.Errorf("max_turns must be non-negative, got: %d", options.MaxTurns)
@@ -228,6 +240,28 @@ func prepareOptions(options *Options) error {
 	}
 
 	return nil
+}
+
+// windowsCmdMetacharacters are the characters cmd.exe interprets (Python _CMD_EXE_METACHARACTERS).
+const windowsCmdMetacharacters = "&|<>^%!\"\r\n"
+
+// validateWindowsArgValue rejects cmd.exe metacharacters in an argv value on Windows.
+// Defense in depth: values such as resume often come from external input (Python #1123).
+func validateWindowsArgValue(goos, name, value string) error {
+	if goos != windowsOS {
+		return nil
+	}
+	var bad []string
+	for _, c := range windowsCmdMetacharacters {
+		if strings.ContainsRune(value, c) {
+			bad = append(bad, strconv.QuoteRune(c))
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s value %q contains characters that are unsafe to pass on a Windows command line: %s",
+		name, value, strings.Join(bad, " "))
 }
 
 // Connect establishes a connection to the Claude Code CLI.
