@@ -415,7 +415,7 @@ func (p *Parser) ProcessLine(line string) ([]Message, error) {
 
     // Check buffer size before adding
     if p.buffer.Len()+len(line) > p.maxBufferSize {
-        return nil, fmt.Errorf("buffer overflow: exceeded %d bytes", p.maxBufferSize)
+        return nil, NewBufferOverflowError(p.maxBufferSize, nil) // "JSON message exceeded maximum buffer size of N bytes"
     }
 
     p.buffer.WriteString(line)

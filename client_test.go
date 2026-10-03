@@ -3181,6 +3181,37 @@ func TestValidateWindowsArgValue(t *testing.T) {
 	}
 }
 
+// TestValidateWindowsArgs pins Python _reject_windows_cmd_metacharacters for each argv value option.
+func TestValidateWindowsArgs(t *testing.T) {
+	bad := "x&calc"
+	tests := []struct {
+		name    string
+		goos    string
+		options *Options
+		wantErr string
+	}{
+		{"resume_windows", windowsOS, &Options{Resume: &bad}, "resume"},
+		{"resume_session_at_windows", windowsOS, &Options{ResumeSessionAt: &bad}, "resume_session_at"},
+		{"resume_drops_turn_windows", windowsOS, &Options{ResumeDropsTurn: &bad}, "resume_drops_turn"},
+		{"resume_session_at_linux", "linux", &Options{ResumeSessionAt: &bad}, ""},
+		{"unset_windows", windowsOS, &Options{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateWindowsArgs(tt.goos, tt.options)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateWindowsArgs() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.HasPrefix(err.Error(), tt.wantErr+" value") {
+				t.Fatalf("validateWindowsArgs() error = %v, want an error that names %s", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // TestPrepareOptionsResumeMetacharacters covers the call site: only Windows rejects the value.
 func TestPrepareOptionsResumeMetacharacters(t *testing.T) {
 	resume := "abc & calc.exe"

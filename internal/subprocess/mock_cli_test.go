@@ -66,6 +66,7 @@ const (
 	mockModeIgnoreSIGTERM       = "ignore_sigterm"
 	mockModeSlowExitAfterEOF    = "slow_exit_after_eof"
 	mockModeStopReading         = "stop_reading"
+	mockModeFixedSizeLine       = "fixed_size_line"
 )
 
 // Event names written to the mock event log.
@@ -337,9 +338,31 @@ func runShutdownMock(mode string) {
 		// Never read stdin again, so the SDK's stdin writes block once the pipe is full.
 		time.Sleep(2 * time.Minute)
 	default:
+		runStreamMock(mode)
+	}
+}
+
+// runStreamMock runs the stdout framing modes and exits 2 for an unknown mode.
+func runStreamMock(mode string) {
+	switch mode {
+	case mockModeFixedSizeLine:
+		answerInitialize()
+		fmt.Println(fixedSizeAssistantLine(mockFixedLineLen))
+		controlEchoLoop(os.Stdin, os.Stdout)
+	default:
 		fmt.Fprintf(os.Stderr, "unknown mock CLI mode: %s\n", mode)
 		os.Exit(2)
 	}
+}
+
+// mockFixedLineLen is the byte length of the line fixed_size_line writes.
+const mockFixedLineLen = 4096
+
+// fixedSizeAssistantLine returns an assistant message line of exactly n bytes.
+func fixedSizeAssistantLine(n int) string {
+	const prefix = `{"type":"assistant","message":{"content":[{"type":"text","text":"`
+	const suffix = `"}],"model":"claude-3"}}`
+	return prefix + strings.Repeat("x", n-len(prefix)-len(suffix)) + suffix
 }
 
 // runMockIgnoreSIGTERM logs and ignores SIGTERM, so only SIGKILL ends it.

@@ -101,6 +101,9 @@ type InitializeRequest struct {
 	// map of agent fields with nil/empty Tools and empty Model stripped
 	// at the subprocess boundary (see agentsToMap).
 	Agents map[string]any `json:"agents,omitempty"`
+	// Skills filters the discovered Skills. A pointer keeps an empty list
+	// (disable all) distinct from absent (no filter), as in Python.
+	Skills *[]string `json:"skills,omitempty"`
 }
 
 // InitializeResponse contains the CLI's response to initialization.

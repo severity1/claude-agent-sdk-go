@@ -38,6 +38,7 @@ parser/
 - `AssistantMessage.Error` field: parsed from top-level `data["error"]` (not nested `data["message"]["error"]`); CLI wire format is `{"type":"assistant","error":"rate_limit","message":{...}}`; check with `HasError()` / `IsRateLimited()`
 - `usage` field placement: opposite of `parent_tool_use_id`/`error` above - nested under `message` for `AssistantMessage` (`data["message"]["usage"]`) but top-level for `ResultMessage` (`data["usage"]`)
 - `ToolResultBlock.IsError`: optional field parsed as `*bool` (nil when absent)
+- `NewBufferOverflowError(limit, cause)` returns `*shared.JSONDecodeError` with the Python-matching text `"JSON message exceeded maximum buffer size of N bytes"`; exported so the subprocess stdout reader can build the same error
 
 <!-- END AUTO-MANAGED -->
 

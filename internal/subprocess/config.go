@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/severity1/claude-agent-sdk-go/internal/cli"
 	"github.com/severity1/claude-agent-sdk-go/internal/control"
@@ -135,7 +136,20 @@ func (t *Transport) buildProtocolOptions() []control.ProtocolOption {
 	if len(t.options.Agents) > 0 {
 		opts = append(opts, control.WithAgents(agentsToMap(t.options.Agents)))
 	}
+	if skillsOpt := t.skillsProtocolOption(); skillsOpt != nil {
+		opts = append(opts, skillsOpt)
+	}
 	return opts
+}
+
+// skillsProtocolOption returns the initialize Skills filter, or nil when
+// Skills is not a list. SkillsAll and nil mean no filter (Python query.py).
+func (t *Transport) skillsProtocolOption() control.ProtocolOption {
+	skills, ok := t.options.Skills.([]string)
+	if !ok {
+		return nil
+	}
+	return control.WithSkills(skills)
 }
 
 // canUseToolAdapter wraps the user-facing CanUseTool callback (which uses
@@ -218,7 +232,14 @@ func agentsToMap(agents map[string]shared.AgentDefinition) map[string]any {
 
 // buildEnvironment constructs the environment variables for the subprocess.
 func (t *Transport) buildEnvironment() []string {
-	env := os.Environ()
+	// Drop the inherited CLAUDECODE guard so an SDK run inside a Claude Code
+	// session can start the CLI; ExtraEnv can set it again (Python #732).
+	var env []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "CLAUDECODE=") {
+			env = append(env, entry)
+		}
+	}
 
 	// Set entrypoint to identify SDK to CLI
 	env = append(env, "CLAUDE_CODE_ENTRYPOINT="+t.entrypoint)
@@ -234,6 +255,9 @@ func (t *Transport) buildEnvironment() []string {
 			env = append(env, fmt.Sprintf("%s=%s", key, value))
 		}
 	}
+
+	// Set last so ExtraEnv cannot override it (Python #184).
+	env = append(env, "CLAUDE_AGENT_SDK_VERSION="+shared.SDKVersion)
 
 	return env
 }

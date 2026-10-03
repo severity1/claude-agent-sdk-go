@@ -119,6 +119,16 @@ func (p *Parser) BufferSize() int {
 	return p.buffer.Len()
 }
 
+// NewBufferOverflowError returns the error for a stdout message longer than
+// limit bytes. The text matches the Python SDK, so callers can match on it.
+func NewBufferOverflowError(limit int, cause error) *shared.JSONDecodeError {
+	return shared.NewJSONDecodeError(
+		fmt.Sprintf("JSON message exceeded maximum buffer size of %d bytes", limit),
+		0,
+		cause,
+	)
+}
+
 // processJSONLine attempts to parse accumulated buffer as JSON using speculative parsing.
 // This is the core of the speculative parsing strategy from the Python SDK.
 func (p *Parser) processJSONLine(jsonLine string) (shared.Message, error) {
@@ -137,9 +147,8 @@ func (p *Parser) processJSONLineUnlocked(jsonLine string) (shared.Message, error
 	if p.buffer.Len() > p.maxBufferSize {
 		bufferSize := p.buffer.Len()
 		p.buffer.Reset()
-		return nil, shared.NewJSONDecodeError(
-			"buffer overflow",
-			0,
+		return nil, NewBufferOverflowError(
+			p.maxBufferSize,
 			fmt.Errorf("buffer size %d exceeds limit %d", bufferSize, p.maxBufferSize),
 		)
 	}

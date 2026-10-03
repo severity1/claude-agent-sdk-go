@@ -98,3 +98,26 @@ func TestBuildProtocolOptionsOmitsAgentsWhenEmpty(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildProtocolOptionsSkills pins Python query.py: only a []string
+// (also empty) adds the skills option; SkillsAll and nil add nothing.
+func TestBuildProtocolOptionsSkills(t *testing.T) {
+	tests := []struct {
+		name    string
+		skills  any
+		wantOpt bool
+	}{
+		{"nil_skills", nil, false},
+		{"skills_all", shared.SkillsAll, false},
+		{"skills_list", []string{"pdf"}, true},
+		{"skills_disabled", []string{}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := New("/usr/bin/claude", &shared.Options{Skills: tt.skills}, "sdk-go").buildProtocolOptions()
+			if got := len(opts) == 1; got != tt.wantOpt {
+				t.Errorf("skills option present = %v (%d opts), want %v", got, len(opts), tt.wantOpt)
+			}
+		})
+	}
+}

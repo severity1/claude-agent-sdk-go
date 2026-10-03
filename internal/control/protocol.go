@@ -68,6 +68,9 @@ type Protocol struct {
 	// agents travel in the initialize control request, bypassing argv size limits.
 	agents map[string]any
 
+	// skills is sent in initialize only when set; nil means no filter.
+	skills *[]string
+
 	// Background goroutine management
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -122,6 +125,15 @@ func WithSdkMcpServers(servers map[string]McpServer) ProtocolOption {
 func WithAgents(agents map[string]any) ProtocolOption {
 	return func(p *Protocol) {
 		p.agents = agents
+	}
+}
+
+// WithSkills configures the Skills filter sent in the initialize request.
+// An empty list disables all Skills.
+func WithSkills(skills []string) ProtocolOption {
+	return func(p *Protocol) {
+		list := append([]string{}, skills...)
+		p.skills = &list
 	}
 }
 
@@ -504,6 +516,7 @@ func (p *Protocol) Initialize(ctx context.Context) (*InitializeResponse, error) 
 		if len(p.agents) > 0 {
 			initReq.Agents = p.agents
 		}
+		initReq.Skills = p.skills
 
 		// Send initialize request
 		result, err := p.SendControlRequest(ctx, initReq, p.initTimeout)

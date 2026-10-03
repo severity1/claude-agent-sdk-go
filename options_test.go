@@ -1798,11 +1798,32 @@ func TestSessionManagementOptions(t *testing.T) {
 	t.Run("nil_by_default", func(t *testing.T) {
 		options := NewOptions()
 		assertOptionsForkSession(t, options, false)
+		if options.SettingSources != nil {
+			t.Errorf("Expected nil SettingSources (CLI defaults), got %v", options.SettingSources)
+		}
+	})
+
+	t.Run("no_args_means_isolation", func(t *testing.T) {
+		options := NewOptions(WithSettingSources())
 		if options.SettingSources == nil {
-			t.Error("Expected SettingSources to be initialized, got nil")
+			t.Error("Expected non-nil empty SettingSources, got nil")
 		}
 		if len(options.SettingSources) != 0 {
 			t.Errorf("Expected empty SettingSources, got %v", options.SettingSources)
+		}
+	})
+
+	t.Run("resume_session_at_and_drops_turn", func(t *testing.T) {
+		options := NewOptions(
+			WithResume("session-123"),
+			WithResumeSessionAt("at-uuid"),
+			WithResumeDropsTurn("drops-uuid"),
+		)
+		if options.ResumeSessionAt == nil || *options.ResumeSessionAt != "at-uuid" {
+			t.Errorf("Expected ResumeSessionAt = at-uuid, got %v", options.ResumeSessionAt)
+		}
+		if options.ResumeDropsTurn == nil || *options.ResumeDropsTurn != "drops-uuid" {
+			t.Errorf("Expected ResumeDropsTurn = drops-uuid, got %v", options.ResumeDropsTurn)
 		}
 	})
 

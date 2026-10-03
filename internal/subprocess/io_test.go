@@ -2,6 +2,8 @@ package subprocess
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -393,4 +395,72 @@ func TestStderrCallbackWithMockCLI(t *testing.T) {
 	if receivedCount == 0 {
 		t.Log("No stderr lines received - this may be expected if mock CLI doesn't output to stderr")
 	}
+}
+
+// TestTransportMaxBufferSizeBoundary ports Python test_subprocess_buffering:
+// a line of exactly the limit passes, and a longer line fails with a
+// *JSONDecodeError that names the limit (Python uses ">", not ">=").
+func TestTransportMaxBufferSizeBoundary(t *testing.T) {
+	tests := []struct {
+		name    string
+		limit   int
+		wantErr bool
+	}{
+		{"line_equal_to_limit_passes", mockFixedLineLen, false},
+		{"line_over_limit_fails", mockFixedLineLen - 1, true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := setupTransportTestContext(t, 30*time.Second)
+			defer cancel()
+
+			limit := test.limit
+			transport := New(newTransportMockCLIMode(t, mockModeFixedSizeLine), &shared.Options{MaxBufferSize: &limit}, "sdk-go")
+			t.Cleanup(func() { _ = transport.Close() })
+			connectTransportSafely(ctx, t, transport)
+
+			msg, err := firstMessageOrError(ctx, t, transport)
+			if !test.wantErr {
+				if err != nil || msg == nil {
+					t.Fatalf("got message %v, error %v; want the fixed-size line", msg, err)
+				}
+				return
+			}
+			var decodeErr *shared.JSONDecodeError
+			if !errors.As(err, &decodeErr) {
+				t.Fatalf("error = %v (%T), message %v; want *JSONDecodeError", err, err, msg)
+			}
+			want := fmt.Sprintf("JSON message exceeded maximum buffer size of %d bytes", limit)
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %q, want substring %q", err.Error(), want)
+			}
+		})
+	}
+}
+
+// firstMessageOrError returns the first message or error from the transport.
+// A closed channel is skipped, because the error and the close can arrive together.
+func firstMessageOrError(ctx context.Context, t *testing.T, transport *Transport) (shared.Message, error) {
+	t.Helper()
+	msgChan, errChan := transport.ReceiveMessages(ctx)
+	for msgChan != nil || errChan != nil {
+		select {
+		case msg, ok := <-msgChan:
+			if !ok {
+				msgChan = nil
+				continue
+			}
+			return msg, nil
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil
+				continue
+			}
+			return nil, err
+		case <-ctx.Done():
+			t.Fatal("no message or error before the timeout")
+		}
+	}
+	return nil, nil
 }

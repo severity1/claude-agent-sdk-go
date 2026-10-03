@@ -655,8 +655,28 @@ func TestBufferManagement(t *testing.T) {
 		largeString := strings.Repeat("x", MaxBufferSize+1000)
 
 		_, err := parser.processJSONLine(largeString)
-		assertBufferOverflowError(t, err)
+		assertBufferOverflowError(t, err, MaxBufferSize)
 		assertBufferEmpty(t, parser)
+	})
+
+	// Python test_buffer_size_option: the custom limit applies and is named in the error.
+	t.Run("custom_size_over_limit", func(t *testing.T) {
+		parser := NewWithSize(512)
+		_, err := parser.processJSONLine(`{"data": "` + strings.Repeat("x", 512+10))
+		assertBufferOverflowError(t, err, 512)
+		assertBufferEmpty(t, parser)
+	})
+
+	t.Run("custom_size_equal_to_limit", func(t *testing.T) {
+		line := `{"type":"system","subtype":"status","data":"` + strings.Repeat("x", 100) + `"}`
+		parser := NewWithSize(len(line))
+		msg, err := parser.processJSONLine(line)
+		if err != nil {
+			t.Fatalf("line of exactly the limit: error = %v, want nil", err)
+		}
+		if msg == nil {
+			t.Fatal("line of exactly the limit: got nil message")
+		}
 	})
 
 	t.Run("buffer_reset_on_success", func(t *testing.T) {
@@ -1486,7 +1506,7 @@ func assertBufferNotEmpty(t *testing.T, parser *Parser) {
 	}
 }
 
-func assertBufferOverflowError(t *testing.T, err error) {
+func assertBufferOverflowError(t *testing.T, err error, limit int) {
 	t.Helper()
 	if err == nil {
 		t.Fatal("Expected buffer overflow error, got nil")
@@ -1496,8 +1516,9 @@ func assertBufferOverflowError(t *testing.T, err error) {
 		t.Fatalf("Expected JSONDecodeError, got %T", err)
 		return
 	}
-	if !strings.Contains(jsonDecodeErr.Error(), "buffer overflow") {
-		t.Errorf("Expected buffer overflow error, got %q", jsonDecodeErr.Error())
+	want := fmt.Sprintf("JSON message exceeded maximum buffer size of %d bytes", limit)
+	if !strings.Contains(jsonDecodeErr.Error(), want) {
+		t.Errorf("Expected %q in error, got %q", want, jsonDecodeErr.Error())
 	}
 }
 

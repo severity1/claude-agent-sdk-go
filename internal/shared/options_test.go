@@ -33,8 +33,8 @@ func TestOptionsDefaults(t *testing.T) {
 		{"ExtraEnv_initialized", options.ExtraEnv == nil, false},
 		{"ExtraEnv_empty", len(options.ExtraEnv), 0},
 		{"ForkSession", options.ForkSession, false},
-		{"SettingSources_initialized", options.SettingSources == nil, false},
-		{"SettingSources_empty", len(options.SettingSources), 0},
+		// nil keeps the CLI default sources (Python setting_sources=None).
+		{"SettingSources_nil", options.SettingSources == nil, true},
 	}
 
 	for _, test := range tests {

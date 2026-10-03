@@ -772,6 +772,30 @@ Resume a specific session by ID.
 func WithResume(sessionID string) Option
 ```
 
+#### `WithResumeSessionAt()`
+
+When resuming, load the conversation only up to and including the message with this UUID. Use it with `WithResume()` (and usually `WithForkSession(true)`) to branch from an earlier point.
+
+```go
+func WithResumeSessionAt(messageUUID string) Option
+```
+
+#### `WithResumeDropsTurn()`
+
+With `WithResumeSessionAt()`: the UUID of the user prompt whose turn the resume discards. The CLI refuses the resume when an entry after the cut point is not part of that turn. The error message contains `Resume rejected by --resume-drops-turn:`. Do not retry the same request.
+
+```go
+func WithResumeDropsTurn(messageUUID string) Option
+```
+
+```go
+claudecode.Query(ctx, prompt,
+    claudecode.WithResume(sessionID),
+    claudecode.WithForkSession(true),
+    claudecode.WithResumeSessionAt(lastKeptUUID),
+    claudecode.WithResumeDropsTurn(nextPromptUUID))
+```
+
 #### `WithForkSession()`
 
 Fork to a new session when resuming instead of continuing.
@@ -862,7 +886,7 @@ func WithSettings(settings string) Option
 
 #### `WithSettingSources()`
 
-Control which filesystem settings to load.
+Control which filesystem settings to load. Without this option the CLI loads its default sources (user, project and local), which include `CLAUDE.md`. Call it with no arguments to load no filesystem settings. Before v0.8.0 the default was no settings.
 
 ```go
 func WithSettingSources(sources ...SettingSource) Option
@@ -875,6 +899,9 @@ Available sources:
 
 ```go
 claudecode.Query(ctx, prompt, claudecode.WithSettingSources(claudecode.SettingSourceProject))
+
+// Isolation: no filesystem settings, no CLAUDE.md
+claudecode.Query(ctx, prompt, claudecode.WithSettingSources())
 ```
 
 ### Skills Options
@@ -937,7 +964,7 @@ func WithCLIPath(path string) Option
 
 #### `WithMaxBufferSize()`
 
-Set maximum buffer size for CLI output.
+Set the maximum size in bytes of one CLI output message (default 1MB). A line of exactly this size is accepted. A longer line ends the stream with a `*JSONDecodeError` that contains `JSON message exceeded maximum buffer size of N bytes`.
 
 ```go
 func WithMaxBufferSize(size int) Option

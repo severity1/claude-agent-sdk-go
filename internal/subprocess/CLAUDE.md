@@ -15,14 +15,15 @@ subprocess/
 ├── transport.go          # Transport struct, Connect, lifecycle orchestration
 ├── io.go                 # Stdout/stderr handling, message parsing
 ├── process.go            # Process termination, cleanup
-├── config.go             # MCP config, environment, protocol options
+├── config.go             # MCP config, environment, protocol options (skills, agents)
 ├── transport_test.go     # Transport lifecycle and core tests
 ├── io_test.go            # I/O and stderr callback tests
 ├── process_test.go       # Process termination tests
 ├── config_test.go        # Environment and MCP config tests
 ├── agents_test.go        # agentsToMap stripping and protocol options wiring tests
 ├── lifecycle_test.go     # Wait ownership, fast-exit output drain, init race, connect cancellation tests
-├── mock_cli_test.go      # TestMain + os.Args[0] mock CLI (cross-platform, CLAUDE_SDK_TEST_MOCK_MODE); modes: default, long_running, should_fail, check_environment, invalid_output, with_control_protocol, with_stderr, init_error, burst_exit, exit_before_init, stdout_closed_alive, hang_init, early_error_result, two_permission_requests, exit_nonzero, error_result_exit
+├── mock_cli_test.go      # TestMain + os.Args[0] mock CLI (cross-platform, CLAUDE_SDK_TEST_MOCK_MODE); modes: default, long_running, should_fail, check_environment, invalid_output, with_control_protocol, with_stderr, init_error, burst_exit, exit_before_init, stdout_closed_alive, hang_init, early_error_result, two_permission_requests, exit_nonzero, error_result_exit, ignore_sigterm, slow_exit_after_eof, stop_reading, fixed_size_line
+├── shutdown_test.go      # Graceful shutdown order and timing tests (event log via CLAUDE_SDK_TEST_MOCK_EVENT_LOG)
 ├── protocol_adapter.go   # ProtocolAdapter for control.Transport interface
 └── protocol_adapter_test.go # Adapter tests
 ```
@@ -52,6 +53,9 @@ subprocess/
 - Exit reporting: `handleStdout(protocol, childProcess{cmd, done})` calls `childProcess.exitError(ctx, lastErrorResult)` after EOF; non-zero exit yields `*shared.ProcessError` ("Claude Code process exited unexpectedly (<state>)", or "Claude Code returned an error result: ..." after an error `ResultMessage`), clean exit or cancelled ctx yields nil. Split into `processStdoutLine` + `sendStreamError` for gocyclo. `SendMessage` returns `*shared.ConnectionError` after `processDone` closes; `IsConnected()` is false after exit (`processExitedLocked`). Tests: `TestTransportReportsCLIExit`, `TestTransportCloseReportsNoProcessError`; helper `answerInitialize` in the mock.
 - Connect failure cleanup: `Connect()` calls `teardownLocked()` when `setupControlProtocol` fails before returning the error. `teardownLocked()` is the unified post-Start cleanup primitive (cancels context, closes protocol, closes stdin, waits goroutines, terminates process, runs cleanup func) shared between `Close()` and the Connect error path. Ensures no subprocess is leaked on a failed connect. `TestTransportConnectFailureTearsDown` + `init_error` mock mode verifies this via `syscall.Signal(0)` probe on the captured PID.
 - Batch CLI refusal: `Connect()` calls `cli.RejectWindowsBatchCLI(runtime.GOOS, t.cliPath)` right after the already-connected check, before the version probe spawns the CLI (BatBadBut, Python PR #1127)
+- Environment build: `buildEnvironment()` drops the inherited `CLAUDECODE` variable, sets `CLAUDE_CODE_ENTRYPOINT`, applies `ExtraEnv`, then sets `CLAUDE_AGENT_SDK_VERSION=shared.SDKVersion` last so `ExtraEnv` cannot override it. `ExtraEnv` can set `CLAUDECODE` again.
+- Stdout line limit: `handleStdout` sizes the scanner buffer to limit+1 (the newline uses one byte), so a line of exactly the limit passes. `bufio.ErrTooLong` becomes `parser.NewBufferOverflowError(limit, err)` through `sendStreamError`. Test: mock mode `fixed_size_line` (4096 bytes, `mockFixedLineLen`).
+- Skills on initialize: `skillsProtocolOption()` returns `control.WithSkills(skills)` only when `options.Skills` is `[]string`. Other values (nil, `SkillsAll`) send no filter.
 - Nil protocol guard: `GetMcpStatus()` (and other control delegation methods) return descriptive error `"internal error: transport connected but control protocol is nil"` when `t.protocol == nil` after connected check
 - `buildProtocolOptions()` is split into per-feature helpers (`canUseToolAdapter`, `hooksProtocolOption`, `sdkMcpServersProtocolOption`) to stay under gocyclo 15. The `agents` wiring uses `control.WithAgents(agentsToMap(...))`; `agentsToMap` converts `shared.AgentDefinition` to `map[string]any` at the package boundary so `control` stays free of any `shared` dependency.
 - `agentsToMap` stripping rule (deliberate divergence from Python): `description` and `prompt` always emit; empty `Tools` slice and empty `Model` string are dropped. Python's rule (`if v is not None`) is more permissive - it preserves `tools=[]` and `model=""`. Go is stricter because `AgentDefinition` uses zero-value-as-unset semantics and there is no way for a caller to distinguish "explicit empty" from "unset" with the current field types. Phase 2 #19 (Python PR #684) will introduce nullable optional fields (skills/memory/mcpServers); at that point the per-field strip decision should be re-examined - description/prompt should keep their unconditional treatment.

@@ -24,5 +24,7 @@
 //	defer client.Close()
 package claudecode
 
+import "github.com/severity1/claude-agent-sdk-go/internal/shared"
+
 // Version represents the current version of the Claude Agent SDK for Go.
-const Version = "0.1.0"
+const Version = shared.SDKVersion

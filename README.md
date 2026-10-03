@@ -330,6 +330,19 @@ claudecode.Query(ctx, prompt,
     claudecode.WithAddDirs("src", "docs"))
 ```
 
+**Settings Sources and CLAUDE.md** (changed in v0.8.0):
+
+By default the CLI loads its settings sources (user, project and local), which include `CLAUDE.md`. This matches the Python SDK. Before v0.8.0, the Go SDK loaded no filesystem settings by default.
+```go
+// Load only the project settings and CLAUDE.md
+claudecode.Query(ctx, prompt,
+    claudecode.WithSettingSources(claudecode.SettingSourceProject))
+
+// Isolation: load no filesystem settings and no CLAUDE.md
+claudecode.Query(ctx, prompt,
+    claudecode.WithSettingSources())
+```
+
 **Session Management** (Client API):
 ```go
 // WithClient provides isolated session contexts

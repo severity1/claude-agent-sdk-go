@@ -294,17 +294,23 @@ func addSessionFlags(cmd []string, options *shared.Options) []string {
 	if options.ForkSession {
 		cmd = append(cmd, "--fork-session")
 	}
-	// Always pass --setting-sources (Python SDK parity)
-	// Empty slice results in empty string value
-	sourcesValue := ""
-	if len(options.SettingSources) > 0 {
+	// Equals form keeps a dash-leading value bound to its flag (Python #1198).
+	if options.ResumeSessionAt != nil && *options.ResumeSessionAt != "" {
+		cmd = append(cmd, "--resume-session-at="+*options.ResumeSessionAt)
+	}
+	// Nil check, not empty: the CLI must reject an empty value so the guard is never silently off.
+	if options.ResumeDropsTurn != nil {
+		cmd = append(cmd, "--resume-drops-turn="+*options.ResumeDropsTurn)
+	}
+	// Nil keeps the CLI defaults; an empty list loads no settings (Python #822).
+	// One token keeps the empty value bound to the flag.
+	if options.SettingSources != nil {
 		strs := make([]string, len(options.SettingSources))
 		for i, s := range options.SettingSources {
 			strs[i] = string(s)
 		}
-		sourcesValue = strings.Join(strs, ",")
+		cmd = append(cmd, "--setting-sources="+strings.Join(strs, ","))
 	}
-	cmd = append(cmd, "--setting-sources", sourcesValue)
 	if options.IncludePartialMessages {
 		cmd = append(cmd, "--include-partial-messages")
 	}

@@ -200,6 +200,8 @@ type Options struct {
 	// Session & State Management
 	ContinueConversation bool            `json:"continue_conversation,omitempty"`
 	Resume               *string         `json:"resume,omitempty"`
+	ResumeSessionAt      *string         `json:"resume_session_at,omitempty"`
+	ResumeDropsTurn      *string         `json:"resume_drops_turn,omitempty"`
 	MaxTurns             int             `json:"max_turns,omitempty"`
 	Settings             *string         `json:"settings,omitempty"`
 	ForkSession          bool            `json:"fork_session,omitempty"`
@@ -465,6 +467,5 @@ func NewOptions() *Options {
 		Plugins:           []SdkPluginConfig{},
 		ExtraArgs:         make(map[string]*string),
 		ExtraEnv:          make(map[string]string),
-		SettingSources:    []SettingSource{},
 	}
 }

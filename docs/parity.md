@@ -27,7 +27,7 @@ Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (5
 | Content block types | 6 | 4 | `ServerToolUseBlock` and `ServerToolResultBlock` pending |
 | Error types | 7 | 6 (+`BaseError`) | `ResultError` pending |
 | Permission modes | 6 | 4 | `dontAsk` and `auto` pending |
-| Option fields | 49 (`ClaudeAgentOptions`) | 38 (`Options`), 61 `With*` constructors | See the option table for the missing fields |
+| Option fields | 49 (`ClaudeAgentOptions`) | 40 (`Options`), 63 `With*` constructors | See the option table for the missing fields |
 | Sandbox config | 3 types | 3 types | 4 `SandboxNetworkConfig` fields pending |
 
 ---
@@ -120,7 +120,7 @@ Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (5
 | `continue_conversation` | `WithContinueConversation(bool)` | PARITY |
 | `resume` | `WithResume(sessionID)` | PARITY |
 | `session_id` | - | PENDING (README #37) |
-| `resume_session_at`, `resume_drops_turn` | - | PENDING (post-snapshot P40) |
+| `resume_session_at`, `resume_drops_turn` | `WithResumeSessionAt(uuid)`, `WithResumeDropsTurn(uuid)` | PARITY (post-snapshot P40) |
 | `fork_session` | `WithForkSession(fork)` | PARITY |
 | `cwd` | `WithCwd(cwd)` | PARITY |
 | `add_dirs` | `WithAddDirs(dirs...)` | PARITY |
@@ -128,13 +128,13 @@ Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (5
 | - | `WithSdkMcpServer(name, server)` | GO EXTRA |
 | `strict_mcp_config` | - | PENDING (post-snapshot P16) |
 | `settings` | `WithSettings(settings)` | PARITY |
-| `setting_sources` | `WithSettingSources(sources...)` | PARTIAL (nil and empty list both send an empty value; post-snapshot P5) |
-| `skills` | `WithSkills(skills)`, `WithSkillsAll()`, `WithSkillsList(names...)`, `WithSkillsDisabled()` | PARTIAL (post-snapshot P1) |
-| `env` | `WithEnv(env)` | PARITY |
+| `setting_sources` | `WithSettingSources(sources...)` | PARITY (unset sends no flag, so the CLI loads its defaults and CLAUDE.md; no arguments loads no settings; post-snapshot P5) |
+| `skills` | `WithSkills(skills)`, `WithSkillsAll()`, `WithSkillsList(names...)`, `WithSkillsDisabled()` | PARTIAL (a list is sent on initialize; name validation and examples pending; post-snapshot P1, P36) |
+| `env` | `WithEnv(env)` | PARITY (the inherited `CLAUDECODE` is dropped, `CLAUDE_AGENT_SDK_VERSION` is set last and cannot be overridden; README #31, Python #184) |
 | - | `WithEnvVar(key, value)` | GO EXTRA |
 | `extra_args` | `WithExtraArgs(args)` | PARITY |
 | `cli_path` | `WithCLIPath(path)` | PARITY (a `.bat`/`.cmd` path is refused on Windows; post-snapshot P32) |
-| `max_buffer_size` | `WithMaxBufferSize(size)` | PARITY |
+| `max_buffer_size` | `WithMaxBufferSize(size)` | PARITY (a line of exactly the limit passes; a longer line gives a `*JSONDecodeError` "JSON message exceeded maximum buffer size of N bytes"; Python #190) |
 | `stderr` | `WithStderrCallback(callback)` | PARITY |
 | `debug_stderr` (deprecated) | `WithDebugWriter(w)` | PARITY |
 | - | `WithDebugStderr()` | GO EXTRA |

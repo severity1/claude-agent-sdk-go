@@ -215,10 +215,8 @@ func prepareOptions(options *Options) error {
 		}
 	}
 
-	if options.Resume != nil {
-		if err := validateWindowsArgValue(runtime.GOOS, "resume", *options.Resume); err != nil {
-			return err
-		}
+	if err := validateWindowsArgs(runtime.GOOS, options); err != nil {
+		return err
 	}
 
 	// Validate max turns
@@ -244,6 +242,27 @@ func prepareOptions(options *Options) error {
 
 // windowsCmdMetacharacters are the characters cmd.exe interprets (Python _CMD_EXE_METACHARACTERS).
 const windowsCmdMetacharacters = "&|<>^%!\"\r\n"
+
+// validateWindowsArgs checks each option that becomes a --flag=value argv token.
+func validateWindowsArgs(goos string, options *Options) error {
+	values := []struct {
+		name  string
+		value *string
+	}{
+		{"resume", options.Resume},
+		{"resume_session_at", options.ResumeSessionAt},
+		{"resume_drops_turn", options.ResumeDropsTurn},
+	}
+	for _, v := range values {
+		if v.value == nil {
+			continue
+		}
+		if err := validateWindowsArgValue(goos, v.name, *v.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // validateWindowsArgValue rejects cmd.exe metacharacters in an argv value on Windows.
 // Defense in depth: values such as resume often come from external input (Python #1123).

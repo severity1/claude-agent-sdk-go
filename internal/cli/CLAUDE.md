@@ -21,6 +21,7 @@ cli/
 **Key Functions**:
 - `FindCLI()`: Searches PATH and platform-specific locations for Claude CLI
 - `BuildCommand()`: Constructs CLI arguments from Options. Always emits `--input-format stream-json` (Python SDK PR #468 parity); never `--print` or `--agents` - prompts ride on stdin after the initialize handshake, and agents ride on the initialize control request
+- `addSessionFlags()`: Emits session flags. Optional-value flags use one token `--flag=value` so a dash-leading value stays bound to its flag: `--resume=`, `--resume-session-at=` (non-empty only), `--resume-drops-turn=` (non-nil, even if empty), `--setting-sources=` (non-nil; empty slice gives an empty value, nil gives no flag)
 - `GetCLIVersion()`: Extracts and validates CLI version
 
 <!-- END AUTO-MANAGED -->

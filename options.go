@@ -255,6 +255,27 @@ func WithResume(sessionID string) Option {
 	}
 }
 
+// WithResumeSessionAt loads a resumed session only up to and including the
+// message with this UUID. Use it with WithResume (and usually
+// WithForkSession) to branch from an earlier point in the conversation.
+// The UUID is usually an AssistantMessage UUID or a SessionMessage UUID.
+func WithResumeSessionAt(messageUUID string) Option {
+	return func(o *Options) {
+		o.ResumeSessionAt = &messageUUID
+	}
+}
+
+// WithResumeDropsTurn sets the UUID of the user prompt whose turn a
+// WithResumeSessionAt resume discards. The CLI then refuses the resume when
+// an entry after the cut point is not part of that turn. The error message
+// contains "Resume rejected by --resume-drops-turn:". Do not retry the same
+// request; resume without the cut instead.
+func WithResumeDropsTurn(messageUUID string) Option {
+	return func(o *Options) {
+		o.ResumeDropsTurn = &messageUUID
+	}
+}
+
 // WithCwd sets the working directory.
 func WithCwd(cwd string) Option {
 	return func(o *Options) {
@@ -321,9 +342,13 @@ func WithForkSession(fork bool) Option {
 
 // WithSettingSources sets which settings sources to load.
 // Valid sources are SettingSourceUser, SettingSourceProject, and SettingSourceLocal.
+// Without this option the CLI loads its default sources (user, project and
+// local), which includes CLAUDE.md. Call it with no arguments to load no
+// filesystem settings.
 func WithSettingSources(sources ...SettingSource) Option {
 	return func(o *Options) {
-		o.SettingSources = sources
+		// Copy so that no arguments gives a non-nil empty list (isolation).
+		o.SettingSources = append([]SettingSource{}, sources...)
 	}
 }
 

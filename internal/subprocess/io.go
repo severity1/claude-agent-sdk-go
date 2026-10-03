@@ -70,14 +70,13 @@ func (t *Transport) handleStdout(protocol *control.Protocol, child childProcess)
 
 	scanner := bufio.NewScanner(t.stdout)
 
-	// Scanner token size must match the parser's buffer limit so lines aren't
-	// truncated before parsing. Default is 64KB; respect MaxBufferSize if set.
-	scanTokenSize := parser.MaxBufferSize
+	maxLineSize := parser.MaxBufferSize
 	if t.options != nil && t.options.MaxBufferSize != nil {
-		scanTokenSize = *t.options.MaxBufferSize
+		maxLineSize = *t.options.MaxBufferSize
 	}
-	buf := make([]byte, scanTokenSize)
-	scanner.Buffer(buf, scanTokenSize)
+	// The scanner buffer also holds the newline, so +1 lets a line of exactly
+	// the limit through (Python rejects only a longer line).
+	scanner.Buffer(make([]byte, maxLineSize+1), maxLineSize+1)
 
 	var lastErrorResult string
 	for scanner.Scan() {
@@ -91,6 +90,10 @@ func (t *Transport) handleStdout(protocol *control.Protocol, child childProcess)
 
 	signalStdoutDone()
 	if err := scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			t.sendStreamError(parser.NewBufferOverflowError(maxLineSize, err))
+			return
+		}
 		t.sendStreamError(fmt.Errorf("stdout scanner error: %w", err))
 		return
 	}

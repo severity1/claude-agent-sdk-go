@@ -857,6 +857,16 @@ func TestSessionManagementFlagsSupport(t *testing.T) {
 			validate: validateSettingSourcesAll,
 		},
 		{
+			name:     "setting_sources_nil",
+			options:  &shared.Options{},
+			validate: validateSettingSourcesNil,
+		},
+		{
+			name:     "setting_sources_nil_from_new_options",
+			options:  shared.NewOptions(),
+			validate: validateSettingSourcesNil,
+		},
+		{
 			name:     "setting_sources_empty",
 			options:  &shared.Options{SettingSources: []shared.SettingSource{}},
 			validate: validateSettingSourcesEmpty,
@@ -869,6 +879,33 @@ func TestSessionManagementFlagsSupport(t *testing.T) {
 				SettingSources: []shared.SettingSource{shared.SettingSourceUser},
 			},
 			validate: validateForkSessionWithResume,
+		},
+		{
+			// Python test_build_command_resume_session_at_and_drops_turn (#1198).
+			name: "resume_session_at_and_drops_turn",
+			options: &shared.Options{
+				Resume:          stringPtr("abc123"),
+				ForkSession:     true,
+				ResumeSessionAt: stringPtr(testResumeAtUUID),
+				ResumeDropsTurn: stringPtr(testDropsTurnUUID),
+			},
+			validate: validateResumeSessionAtAndDropsTurn,
+		},
+		{
+			name:     "resume_drops_turn_omitted_by_default",
+			options:  &shared.Options{Resume: stringPtr("abc123"), ResumeSessionAt: stringPtr("x")},
+			validate: validateResumeDropsTurnOmitted,
+		},
+		{
+			// An empty declaration reaches the CLI, which rejects it, so the guard is never silently off.
+			name:     "empty_resume_drops_turn_forwarded",
+			options:  &shared.Options{Resume: stringPtr("abc123"), ResumeSessionAt: stringPtr("x"), ResumeDropsTurn: stringPtr("")},
+			validate: validateEmptyResumeDropsTurn,
+		},
+		{
+			name:     "empty_resume_session_at_omitted",
+			options:  &shared.Options{Resume: stringPtr("abc123"), ResumeSessionAt: stringPtr("")},
+			validate: validateResumeSessionAtOmitted,
 		},
 		{
 			name:     "resume_value_starting_with_dash",
@@ -897,29 +934,83 @@ func validateForkSessionDisabled(t *testing.T, cmd []string) {
 
 func validateSettingSourcesSingle(t *testing.T, cmd []string) {
 	t.Helper()
-	assertContainsArgs(t, cmd, "--setting-sources", "user")
+	assertContainsArg(t, cmd, "--setting-sources=user")
 }
 
 func validateSettingSourcesMultiple(t *testing.T, cmd []string) {
 	t.Helper()
-	assertContainsArgs(t, cmd, "--setting-sources", "user,project")
+	assertContainsArg(t, cmd, "--setting-sources=user,project")
 }
 
 func validateSettingSourcesAll(t *testing.T, cmd []string) {
 	t.Helper()
-	assertContainsArgs(t, cmd, "--setting-sources", "user,project,local")
+	assertContainsArg(t, cmd, "--setting-sources=user,project,local")
 }
 
+// An empty list must reach the CLI as one token so it means "no sources" (Python #822).
 func validateSettingSourcesEmpty(t *testing.T, cmd []string) {
 	t.Helper()
-	assertContainsArgs(t, cmd, "--setting-sources", "")
+	assertContainsArg(t, cmd, "--setting-sources=")
+	assertNotContainsArg(t, cmd, "--setting-sources")
+}
+
+// Nil keeps the CLI defaults, so no flag is sent (Python #822).
+func validateSettingSourcesNil(t *testing.T, cmd []string) {
+	t.Helper()
+	assertNoSettingSourcesFlag(t, cmd)
+}
+
+func assertNoSettingSourcesFlag(t *testing.T, cmd []string) {
+	t.Helper()
+	assertNoArgWithPrefix(t, cmd, "--setting-sources")
 }
 
 func validateForkSessionWithResume(t *testing.T, cmd []string) {
 	t.Helper()
 	assertContainsArg(t, cmd, "--resume=session-123")
 	assertContainsArg(t, cmd, "--fork-session")
-	assertContainsArgs(t, cmd, "--setting-sources", "user")
+	assertContainsArg(t, cmd, "--setting-sources=user")
+}
+
+const (
+	testResumeAtUUID  = "0d78eb23-2d48-4741-b970-4ed0a3356cce"
+	testDropsTurnUUID = "ce0a8011-2c8d-40f2-86e5-d6e1b0c041c0"
+)
+
+func validateResumeSessionAtAndDropsTurn(t *testing.T, cmd []string) {
+	t.Helper()
+	assertContainsArg(t, cmd, "--resume-session-at="+testResumeAtUUID)
+	assertContainsArg(t, cmd, "--resume-drops-turn="+testDropsTurnUUID)
+	assertNotContainsArg(t, cmd, "--resume-session-at")
+	assertNotContainsArg(t, cmd, "--resume-drops-turn")
+	assertNotContainsArg(t, cmd, testResumeAtUUID)
+	assertNotContainsArg(t, cmd, testDropsTurnUUID)
+}
+
+func validateResumeDropsTurnOmitted(t *testing.T, cmd []string) {
+	t.Helper()
+	assertContainsArg(t, cmd, "--resume-session-at=x")
+	assertNoArgWithPrefix(t, cmd, "--resume-drops-turn")
+}
+
+func validateEmptyResumeDropsTurn(t *testing.T, cmd []string) {
+	t.Helper()
+	assertContainsArg(t, cmd, "--resume-drops-turn=")
+}
+
+// Python sends --resume-session-at only for a truthy value.
+func validateResumeSessionAtOmitted(t *testing.T, cmd []string) {
+	t.Helper()
+	assertNoArgWithPrefix(t, cmd, "--resume-session-at")
+}
+
+func assertNoArgWithPrefix(t *testing.T, cmd []string, prefix string) {
+	t.Helper()
+	for _, arg := range cmd {
+		if strings.HasPrefix(arg, prefix) {
+			t.Errorf("Expected no %s argument, got %q in %v", prefix, arg, cmd)
+		}
+	}
 }
 
 // A dash-leading resume value must stay bound to --resume, not parse as its own flag (Python #1123).
@@ -1546,6 +1637,12 @@ func TestSkillsFlagSupport(t *testing.T) {
 			validate: validateSkillsDefaultsSettingSources,
 		},
 		{
+			// P1(b): the NewOptions default must not hide the skills default.
+			name:     "skills_disabled_from_new_options_defaults_setting_sources",
+			options:  newOptionsWithSkills([]string{}),
+			validate: validateSkillsDefaultsSettingSources,
+		},
+		{
 			name: "skills_does_not_override_explicit_setting_sources",
 			options: &shared.Options{
 				Skills:         shared.SkillsAll,
@@ -1584,6 +1681,12 @@ func TestSkillsFlagSupport(t *testing.T) {
 	}
 }
 
+func newOptionsWithSkills(skills any) *shared.Options {
+	options := shared.NewOptions()
+	options.Skills = skills
+	return options
+}
+
 func validateSkillsAll(t *testing.T, cmd []string) {
 	t.Helper()
 	assertContainsArgs(t, cmd, "--allowed-tools", "Skill")
@@ -1607,12 +1710,12 @@ func validateSkillsDisabled(t *testing.T, cmd []string) {
 
 func validateSkillsDefaultsSettingSources(t *testing.T, cmd []string) {
 	t.Helper()
-	assertContainsArgs(t, cmd, "--setting-sources", "user,project")
+	assertContainsArg(t, cmd, "--setting-sources=user,project")
 }
 
 func validateSkillsPreservesSettingSources(t *testing.T, cmd []string) {
 	t.Helper()
-	assertContainsArgs(t, cmd, "--setting-sources", "local")
+	assertContainsArg(t, cmd, "--setting-sources=local")
 }
 
 func validateSkillsNoDuplicate(t *testing.T, cmd []string) {
@@ -1627,9 +1730,9 @@ func validateSkillsPreservesAllowedTools(t *testing.T, cmd []string) {
 
 func validateSkillsNoop(t *testing.T, cmd []string) {
 	t.Helper()
-	// AllowedTools unchanged; SettingSources stays at the global default (empty).
+	// AllowedTools unchanged; SettingSources stays nil, so no flag.
 	assertContainsArgs(t, cmd, "--allowed-tools", "Read")
-	assertContainsArgs(t, cmd, "--setting-sources", "")
+	assertNoSettingSourcesFlag(t, cmd)
 }
 
 // TestIsWindowsBatchPath pins Python _is_windows_batch_cli: any path component, split on ":", trailing ". " trimmed.

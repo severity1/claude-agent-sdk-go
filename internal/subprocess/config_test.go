@@ -36,10 +36,59 @@ func TestSubprocessEnvironmentVariables(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		options  *shared.Options
-		validate func(t *testing.T, env []string)
+		name      string
+		parentEnv map[string]string
+		options   *shared.Options
+		validate  func(t *testing.T, env []string)
 	}{
+		{
+			// Python #732: a nested SDK run must not inherit the CLI's guard variable.
+			name:      "inherited_claudecode_dropped",
+			parentEnv: map[string]string{"CLAUDECODE": "1"},
+			options:   &shared.Options{},
+			validate: func(t *testing.T, env []string) {
+				assertEnvNotContainsKey(t, env, "CLAUDECODE")
+			},
+		},
+		{
+			name:      "explicit_claudecode_kept",
+			parentEnv: map[string]string{"CLAUDECODE": "1"},
+			options:   &shared.Options{ExtraEnv: map[string]string{"CLAUDECODE": "1"}},
+			validate: func(t *testing.T, env []string) {
+				assertEnvLastValue(t, env, "CLAUDECODE", "1")
+			},
+		},
+		{
+			name:    "sdk_version_set",
+			options: &shared.Options{},
+			validate: func(t *testing.T, env []string) {
+				assertEnvLastValue(t, env, "CLAUDE_AGENT_SDK_VERSION", shared.SDKVersion)
+			},
+		},
+		{
+			name:    "sdk_version_not_overridable",
+			options: &shared.Options{ExtraEnv: map[string]string{"CLAUDE_AGENT_SDK_VERSION": "0.0.0"}},
+			validate: func(t *testing.T, env []string) {
+				assertEnvLastValue(t, env, "CLAUDE_AGENT_SDK_VERSION", shared.SDKVersion)
+			},
+		},
+		{
+			// Python #686: the SDK entrypoint replaces an inherited value.
+			name:      "inherited_entrypoint_replaced",
+			parentEnv: map[string]string{"CLAUDE_CODE_ENTRYPOINT": "x"},
+			options:   &shared.Options{},
+			validate: func(t *testing.T, env []string) {
+				assertEnvLastValue(t, env, "CLAUDE_CODE_ENTRYPOINT", "sdk-go")
+			},
+		},
+		{
+			name:      "extra_env_entrypoint_wins",
+			parentEnv: map[string]string{"CLAUDE_CODE_ENTRYPOINT": "x"},
+			options:   &shared.Options{ExtraEnv: map[string]string{"CLAUDE_CODE_ENTRYPOINT": "custom"}},
+			validate: func(t *testing.T, env []string) {
+				assertEnvLastValue(t, env, "CLAUDE_CODE_ENTRYPOINT", "custom")
+			},
+		},
 		{
 			name: "custom_env_vars_passed",
 			options: &shared.Options{
@@ -132,6 +181,9 @@ func TestSubprocessEnvironmentVariables(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			for key, value := range tt.parentEnv {
+				t.Setenv(key, value)
+			}
 			ctx, cancel := setupSubprocessTestContext(t)
 			defer cancel()
 
@@ -488,6 +540,36 @@ func assertEnvContains(t *testing.T, env []string, expected string) {
 		}
 	}
 	t.Errorf("Environment missing %s. Available: %v", expected, env)
+}
+
+// assertEnvNotContainsKey checks that no entry in env sets key
+func assertEnvNotContainsKey(t *testing.T, env []string, key string) {
+	t.Helper()
+	for _, e := range env {
+		if strings.HasPrefix(e, key+"=") {
+			t.Errorf("Environment contains %s, expected it to be absent", e)
+		}
+	}
+}
+
+// assertEnvLastValue checks the last entry for key, which is the value exec uses
+func assertEnvLastValue(t *testing.T, env []string, key, expected string) {
+	t.Helper()
+	found := false
+	last := ""
+	for _, e := range env {
+		if strings.HasPrefix(e, key+"=") {
+			found = true
+			last = strings.TrimPrefix(e, key+"=")
+		}
+	}
+	if !found {
+		t.Errorf("Environment missing key %s", key)
+		return
+	}
+	if last != expected {
+		t.Errorf("Expected last %s=%q, got %q", key, expected, last)
+	}
 }
 
 func stringPtr(s string) *string {
