@@ -17,7 +17,7 @@ Parity is tracked one Python PR at a time:
 
 Each row in those files has a Go status (`done`, `partial`, `pending`, or `n/a`). This document gives the overview. The tracker rows are the source of truth.
 
-Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (58cf570, v0.7.1, Oct 1, 2026).
+Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK v0.8.0 (6c9d76f, Oct 4, 2026).
 
 | Category | Python SDK | Go SDK | Notes |
 |:---------|:-----------|:-------|:------|
@@ -29,6 +29,20 @@ Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (5
 | Permission modes | 6 | 4 | `dontAsk` and `auto` pending |
 | Option fields | 49 (`ClaudeAgentOptions`) | 40 (`Options`), 63 `With*` constructors | See the option table for the missing fields |
 | Sandbox config | 3 types | 3 types | 4 `SandboxNetworkConfig` fields pending |
+
+
+### Open Go PRs (Oct 4, 2026)
+
+These contributor PRs are open and not merged. The tracker rows keep their status until a PR merges.
+
+| Go PR | Python reference | Tracker | Change |
+|:------|:-----------------|:--------|:-------|
+| #164 | `ProcessError` comes after all messages (`_internal/query.py` reader) | none (Go issue #144 follow-up, related to P25) | Deliver buffered messages before the CLI exit error |
+| #165 | `receive_messages()` raises the `ProcessError` | none (Go issue #144 follow-up) | `Client.Done()` and `Client.Err()` (Go-native API) |
+| #166 | `get_server_info()` (`client.py:540-564`) | none (before the tracker window) | Return the CLI initialize response from `GetServerInfo` |
+| #167 | the reader sets its error on each pending request (`_internal/query.py:539-546`) | none (before the tracker window) | Fail pending control requests on CLI exit or `Close` |
+| #168 | `stop_task`, typed task messages, `TaskUpdatedMessage` | README #10 (part), #11; post-snapshot P27 | `StopTask`, `TaskStarted`/`TaskProgress`/`TaskNotification`/`TaskUpdated` messages (Go issue #143) |
+| #169 | `close()` (`_internal/transport/subprocess_cli.py`) | none (Go-only fix, related to README #14a, #30) | `Close` does not wait for a descendant that holds the CLI stdout |
 
 ---
 
@@ -76,11 +90,11 @@ Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (5
 | `set_model(model)` | `SetModel(ctx, model)` | PARITY |
 | `rewind_files(uuid)` | `RewindFiles(ctx, messageUUID)` | PARITY |
 | `get_mcp_status()` | `GetMcpStatus(ctx)` | PARITY |
-| `get_server_info()` | `GetServerInfo(ctx)` | PARITY |
+| `get_server_info()` | `GetServerInfo(ctx)` | PARTIAL (Go returns fixed `connected` and `transport_type` keys; Python returns the CLI initialize response, `client.py:540-564`; open Go PR #166) |
 | `disconnect()` | `Disconnect()` | PARITY |
 | `reconnect_mcp_server(name)` | - | PENDING (README #10) |
 | `toggle_mcp_server(name, enabled)` | - | PENDING (README #10) |
-| `stop_task(task_id)` | - | PENDING (README #10, Go issue #143) |
+| `stop_task(task_id)` | - | PENDING (README #10, Go issue #143; open Go PR #168) |
 | `get_context_usage()` | - | PENDING (README #39) |
 | `async with` context manager | `WithClient()` helper | PARITY (Go-idiomatic resource management) |
 
