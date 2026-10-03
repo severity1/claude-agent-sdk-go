@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -646,7 +647,7 @@ func TestBuildMessagesLinearChain(t *testing.T) {
 func TestBuildMessagesBranchedSession(t *testing.T) {
 	// Branch at a1: both u2 and u3 have parentUuid=a1, but u3 has higher file position.
 	// u1 -> a1 -> u2 (branch A)
-	//          -> u3 -> a3 (branch B, higher index — should be chosen)
+	//          -> u3 -> a3 (branch B, higher index \u2014 should be chosen)
 	entries := []jsonlEntry{
 		{entryType: "user", raw: map[string]any{"type": "user", "uuid": "u1", "message": map[string]any{"content": "Hello"}}},
 		{entryType: "assistant", raw: map[string]any{"type": "assistant", "uuid": "a1", "parentUuid": "u1", "message": map[string]any{"content": "Hi"}}},
@@ -670,7 +671,7 @@ func TestBuildMessagesBranchedSession(t *testing.T) {
 }
 
 func TestBuildMessagesFiltersIsMeta(t *testing.T) {
-	// Chain with isMeta user — should be excluded from output.
+	// Chain with isMeta user \u2014 should be excluded from output.
 	entries := []jsonlEntry{
 		{entryType: "user", raw: map[string]any{"type": "user", "uuid": "u1", "message": map[string]any{"content": "Hello"}}},
 		{entryType: "assistant", raw: map[string]any{"type": "assistant", "uuid": "a1", "parentUuid": "u1", "message": map[string]any{"content": "Hi"}}},
@@ -681,7 +682,7 @@ func TestBuildMessagesFiltersIsMeta(t *testing.T) {
 	}
 
 	msgs := buildMessages("test-session", entries)
-	// Chain is: u1, a1, u_meta(filtered), a_meta, u2, a2 → visible: u1, a1, a_meta, u2, a2
+	// Chain is: u1, a1, u_meta(filtered), a_meta, u2, a2 \u2192 visible: u1, a1, a_meta, u2, a2
 	wantUUIDs := []string{"u1", "a1", "a_meta", "u2", "a2"}
 	if len(msgs) != len(wantUUIDs) {
 		t.Fatalf("got %d messages, want %d", len(msgs), len(wantUUIDs))
@@ -763,7 +764,7 @@ func TestBuildMessagesProgressInChain(t *testing.T) {
 }
 
 func TestBuildMessagesNoParentUuidFallback(t *testing.T) {
-	// No parentUuid on any entry → flat-scan with visibility filter.
+	// No parentUuid on any entry \u2192 flat-scan with visibility filter.
 	entries := []jsonlEntry{
 		{entryType: "queue-operation", raw: map[string]any{"type": "queue-operation"}},
 		{entryType: "user", raw: map[string]any{"type": "user", "uuid": "u1", "message": map[string]any{"content": "Hello"}}},
@@ -914,7 +915,7 @@ func TestSummaryFallbackIncludesFirstPrompt(t *testing.T) {
 }
 
 func TestBuildMessagesDuplicateUUID(t *testing.T) {
-	// Message edits create duplicate UUIDs — the later entry should win (last-write-wins).
+	// Message edits create duplicate UUIDs \u2014 the later entry should win (last-write-wins).
 	// Chain: u1 -> a1(v1) -> u2, then a1 is edited to a1(v2) at a higher file position.
 	// The chain should use a1(v2)'s content.
 	entries := []jsonlEntry{
@@ -969,7 +970,7 @@ func TestBuildMessagesFlatScanFiltersIsMeta(t *testing.T) {
 func TestParseJSONLHeadTailSmallFile(t *testing.T) {
 	_, projDir := setupTestProject(t)
 
-	// Small file (< 128KB) — should read all entries.
+	// Small file (< 128KB) \u2014 should read all entries.
 	writeSessionJSONL(t, projDir, "small-file", []map[string]any{
 		{"type": "queue-operation", "timestamp": "2026-01-01T00:00:00Z"},
 		{"type": "user", "uuid": "u1", "message": map[string]any{"content": "Hello"}, "cwd": "/proj"},
@@ -1564,5 +1565,458 @@ func TestWithIncludeWorktreesDisablesExpansion(t *testing.T) {
 	}
 	if len(sessions) != 1 {
 		t.Fatalf("got %d sessions, want 1", len(sessions))
+	}
+}
+
+// --- Session mutation tests (RenameSession, TagSession) ---
+
+const testMutationSessionID = "550e8400-e29b-41d4-a716-446655440000"
+
+// writeMutationSession writes a one-line session file for the mutation tests
+// and returns its path.
+func writeMutationSession(t *testing.T, projDir string) string {
+	t.Helper()
+	return writeSessionJSONL(t, projDir, testMutationSessionID, []map[string]any{
+		{"type": roleUser, "message": map[string]any{"role": roleUser, "content": "Hello"}, "uuid": "u1", "sessionId": testMutationSessionID},
+	})
+}
+
+// lastLine returns the last line of a file, with its trailing newline.
+func lastLine(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	lines := strings.SplitAfter(strings.TrimSuffix(string(data), "\n"), "\n")
+	return lines[len(lines)-1] + "\n"
+}
+
+func TestRenameSession(t *testing.T) {
+	t.Run("appends custom-title entry with exact bytes", func(t *testing.T) {
+		_, projDir := setupTestProject(t)
+		path := writeMutationSession(t, projDir)
+
+		if err := RenameSession(testMutationSessionID, "  My <refactor> & title  ", WithSessionDirectory("/test/project")); err != nil {
+			t.Fatalf("RenameSession() error: %v", err)
+		}
+		want := `{"type":"custom-title","customTitle":"My <refactor> & title","sessionId":"` + testMutationSessionID + "\"}\n"
+		if got := lastLine(t, path); got != want {
+			t.Errorf("last line = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("last write wins", func(t *testing.T) {
+		_, projDir := setupTestProject(t)
+		writeMutationSession(t, projDir)
+
+		for _, title := range []string{"First", "Second"} {
+			if err := RenameSession(testMutationSessionID, title); err != nil {
+				t.Fatalf("RenameSession(%q) error: %v", title, err)
+			}
+		}
+		info, err := GetSessionInfo(testMutationSessionID)
+		if err != nil || info == nil {
+			t.Fatalf("GetSessionInfo() = %v, %v", info, err)
+		}
+		if info.CustomTitle == nil || *info.CustomTitle != "Second" {
+			t.Errorf("CustomTitle = %v, want Second", info.CustomTitle)
+		}
+	})
+}
+
+func TestRenameSessionErrors(t *testing.T) {
+	errorTests := []struct {
+		name      string
+		sessionID string
+		title     string
+		wantErr   string
+	}{
+		{"invalid session id", "not-a-uuid", "title", "invalid session_id: not-a-uuid"},
+		{"empty title", testMutationSessionID, "", "title must be non-empty"},
+		{"whitespace title", testMutationSessionID, " \t\n ", "title must be non-empty"},
+	}
+	for _, tt := range errorTests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, projDir := setupTestProject(t)
+			path := writeMutationSession(t, projDir)
+			before := lastLine(t, path)
+
+			err := RenameSession(tt.sessionID, tt.title)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("RenameSession() error = %v, want %q", err, tt.wantErr)
+			}
+			if got := lastLine(t, path); got != before {
+				t.Errorf("file changed on error: last line = %q", got)
+			}
+		})
+	}
+}
+
+func TestRenameSessionFileSearch(t *testing.T) {
+	t.Run("missing session", func(t *testing.T) {
+		setupTestProject(t)
+		err := RenameSession(testMutationSessionID, "title")
+		if !errors.Is(err, errSessionNotFound) {
+			t.Errorf("RenameSession() error = %v, want errSessionNotFound", err)
+		}
+	})
+
+	t.Run("missing projects dir", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+		err := RenameSession(testMutationSessionID, "title")
+		if !errors.Is(err, errSessionNotFound) {
+			t.Errorf("RenameSession() error = %v, want errSessionNotFound", err)
+		}
+	})
+
+	t.Run("skips zero-byte stub and writes the real file", func(t *testing.T) {
+		cfgDir, projDir := setupTestProject(t)
+		realPath := writeMutationSession(t, projDir)
+
+		// The stub dir sorts before the real project dir, so a search that
+		// stops at the first existing file would write to the stub.
+		stubDir := filepath.Join(cfgDir, "projects", "-")
+		if err := os.MkdirAll(stubDir, 0o750); err != nil {
+			t.Fatalf("creating stub dir: %v", err)
+		}
+		stubPath := filepath.Join(stubDir, testMutationSessionID+".jsonl")
+		if err := os.WriteFile(stubPath, nil, 0o600); err != nil {
+			t.Fatalf("creating stub: %v", err)
+		}
+
+		if err := RenameSession(testMutationSessionID, "Real"); err != nil {
+			t.Fatalf("RenameSession() error: %v", err)
+		}
+		if fi, err := os.Stat(stubPath); err != nil || fi.Size() != 0 {
+			t.Errorf("stub changed: %v, %v", fi, err)
+		}
+		if got := lastLine(t, realPath); !strings.Contains(got, `"customTitle":"Real"`) {
+			t.Errorf("real file last line = %q", got)
+		}
+	})
+
+	t.Run("directory option scopes the search", func(t *testing.T) {
+		_, projDir := setupTestProject(t)
+		writeMutationSession(t, projDir)
+
+		err := RenameSession(testMutationSessionID, "title",
+			WithSessionDirectory("/other/project"), WithIncludeWorktrees(false))
+		if !errors.Is(err, errSessionNotFound) {
+			t.Errorf("RenameSession() error = %v, want errSessionNotFound", err)
+		}
+	})
+}
+
+func TestTagSession(t *testing.T) {
+	tagPtr := func(s string) *string { return &s }
+
+	t.Run("appends tag entry with exact bytes", func(t *testing.T) {
+		_, projDir := setupTestProject(t)
+		path := writeMutationSession(t, projDir)
+
+		if err := TagSession(testMutationSessionID, tagPtr("  experiment  "), WithSessionDirectory("/test/project")); err != nil {
+			t.Fatalf("TagSession() error: %v", err)
+		}
+		want := `{"type":"tag","tag":"experiment","sessionId":"` + testMutationSessionID + "\"}\n"
+		if got := lastLine(t, path); got != want {
+			t.Errorf("last line = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestTagSessionUpdates(t *testing.T) {
+	tagPtr := func(s string) *string { return &s }
+
+	t.Run("nil clears the tag", func(t *testing.T) {
+		_, projDir := setupTestProject(t)
+		path := writeMutationSession(t, projDir)
+
+		if err := TagSession(testMutationSessionID, tagPtr("keep")); err != nil {
+			t.Fatalf("TagSession(keep) error: %v", err)
+		}
+		if err := TagSession(testMutationSessionID, nil); err != nil {
+			t.Fatalf("TagSession(nil) error: %v", err)
+		}
+		want := `{"type":"tag","tag":"","sessionId":"` + testMutationSessionID + "\"}\n"
+		if got := lastLine(t, path); got != want {
+			t.Errorf("last line = %q, want %q", got, want)
+		}
+		info, err := GetSessionInfo(testMutationSessionID)
+		if err != nil || info == nil {
+			t.Fatalf("GetSessionInfo() = %v, %v", info, err)
+		}
+		if info.Tag != nil {
+			t.Errorf("Tag = %q, want nil", *info.Tag)
+		}
+	})
+
+	t.Run("last write wins", func(t *testing.T) {
+		_, projDir := setupTestProject(t)
+		writeMutationSession(t, projDir)
+
+		for _, tag := range []string{"first", "second"} {
+			if err := TagSession(testMutationSessionID, tagPtr(tag)); err != nil {
+				t.Fatalf("TagSession(%q) error: %v", tag, err)
+			}
+		}
+		info, err := GetSessionInfo(testMutationSessionID)
+		if err != nil || info == nil {
+			t.Fatalf("GetSessionInfo() = %v, %v", info, err)
+		}
+		if info.Tag == nil || *info.Tag != "second" {
+			t.Errorf("Tag = %v, want second", info.Tag)
+		}
+	})
+
+	t.Run("sanitizes unicode", func(t *testing.T) {
+		_, projDir := setupTestProject(t)
+		path := writeMutationSession(t, projDir)
+
+		if err := TagSession(testMutationSessionID, tagPtr("clean\u200btag\ufeff")); err != nil {
+			t.Fatalf("TagSession() error: %v", err)
+		}
+		if got := lastLine(t, path); !strings.Contains(got, `"tag":"cleantag"`) {
+			t.Errorf("last line = %q, want tag cleantag", got)
+		}
+	})
+}
+
+func TestTagSessionErrors(t *testing.T) {
+	tagPtr := func(s string) *string { return &s }
+
+	errorTests := []struct {
+		name      string
+		sessionID string
+		tag       *string
+		wantErr   string
+	}{
+		{"invalid session id", "not-a-uuid", tagPtr("x"), "invalid session_id: not-a-uuid"},
+		{"empty tag", testMutationSessionID, tagPtr(""), "tag must be non-empty (use nil to clear)"},
+		{"whitespace tag", testMutationSessionID, tagPtr("   "), "tag must be non-empty (use nil to clear)"},
+		{"invisible-only tag", testMutationSessionID, tagPtr("\u200b\u200c\ufeff"), "tag must be non-empty (use nil to clear)"},
+	}
+	for _, tt := range errorTests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, projDir := setupTestProject(t)
+			path := writeMutationSession(t, projDir)
+			before := lastLine(t, path)
+
+			err := TagSession(tt.sessionID, tt.tag)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("TagSession() error = %v, want %q", err, tt.wantErr)
+			}
+			if got := lastLine(t, path); got != before {
+				t.Errorf("file changed on error: last line = %q", got)
+			}
+		})
+	}
+
+	t.Run("missing session", func(t *testing.T) {
+		setupTestProject(t)
+		err := TagSession(testMutationSessionID, tagPtr("x"))
+		if !errors.Is(err, errSessionNotFound) {
+			t.Errorf("TagSession() error = %v, want errSessionNotFound", err)
+		}
+	})
+}
+
+func TestTryAppend(t *testing.T) {
+	dir := t.TempDir()
+	data := []byte("line\n")
+
+	t.Run("missing file is not created", func(t *testing.T) {
+		path := filepath.Join(dir, "missing.jsonl")
+		ok, err := tryAppend(path, data)
+		if ok || err != nil {
+			t.Errorf("tryAppend() = %v, %v; want false, nil", ok, err)
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("file was created: %v", err)
+		}
+	})
+
+	t.Run("missing parent dir", func(t *testing.T) {
+		ok, err := tryAppend(filepath.Join(dir, "nope", "x.jsonl"), data)
+		if ok || err != nil {
+			t.Errorf("tryAppend() = %v, %v; want false, nil", ok, err)
+		}
+	})
+
+	t.Run("zero-byte file is skipped", func(t *testing.T) {
+		path := filepath.Join(dir, "empty.jsonl")
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ok, err := tryAppend(path, data)
+		if ok || err != nil {
+			t.Errorf("tryAppend() = %v, %v; want false, nil", ok, err)
+		}
+	})
+
+	t.Run("appends to existing file", func(t *testing.T) {
+		path := filepath.Join(dir, "existing.jsonl")
+		if err := os.WriteFile(path, []byte("first\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 2; i++ {
+			if ok, err := tryAppend(path, data); !ok || err != nil {
+				t.Fatalf("tryAppend() = %v, %v; want true, nil", ok, err)
+			}
+		}
+		got, err := os.ReadFile(filepath.Clean(path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != "first\nline\nline\n" {
+			t.Errorf("content = %q", got)
+		}
+	})
+}
+
+func TestSanitizeUnicode(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"clean string", "hello", "hello"},
+		{"dashes and underscore", "tag-with-dashes_123", "tag-with-dashes_123"},
+		{"zero-width space", "a\u200bb", "ab"},
+		{"zero-width non-joiner", "a\u200cb", "ab"},
+		{"zero-width joiner", "a\u200db", "ab"},
+		{"byte order mark", "\ufeffhello", "hello"},
+		{"directional formatting", "a\u202ab\u202cc", "abc"},
+		{"directional isolates", "a\u2066b\u2069c", "abc"},
+		{"private use start", "a\ue000b", "ab"},
+		{"private use end", "a\uf8ffb", "ab"},
+		{"supplementary private use", "a\U000F0000b", "ab"},
+		{"unassigned", "a\u0378b", "ab"},
+		{"soft hyphen is Cf", "a\u00adb", "ab"},
+		// Python folds this to "A" with NFKC; Go does not normalize.
+		{"no NFKC folding", "\uff21", "\uff21"},
+		{"many zero-width", "a" + strings.Repeat("\u200b", 20) + "b", "ab"},
+		{"keeps non-latin letters", "caf\u00e9 \u65e5\u672c", "caf\u00e9 \u65e5\u672c"},
+		{"keeps emoji", "\U0001F600", "\U0001F600"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeUnicode(tt.in); got != tt.want {
+				t.Errorf("sanitizeUnicode(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// --- Project directory parity tests (long paths, canonical paths) ---
+
+func TestSimpleHash(t *testing.T) {
+	// Expected values come from the Python SDK _simple_hash (sessions.py).
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"", "0"},
+		{"hello", "1n1e4y"},
+		{"world", "1vgtci"},
+		{"/Users/me/proj", "xiiv0i"},
+		{"/" + strings.Repeat("a", 250), "feo44x"},
+		{"/tmp/" + strings.Repeat("\u00e9", 210), "jvwydj"},
+		{"/" + strings.Repeat("y", 200), "a066hd"},
+	}
+	for _, tt := range tests {
+		if got := simpleHash(tt.in); got != tt.want {
+			t.Errorf("simpleHash(%.20q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestEncodeCwdLongPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		cwd  string
+		want string
+	}{
+		{"exactly 200 is not cut", "/" + strings.Repeat("x", 199), "-" + strings.Repeat("x", 199)},
+		{"201 gets hash suffix", "/" + strings.Repeat("y", 200), "-" + strings.Repeat("y", 199) + "-a066hd"},
+		{"long ascii", "/" + strings.Repeat("a", 250), "-" + strings.Repeat("a", 199) + "-feo44x"},
+		{"long non-ascii counts runes", "/tmp/" + strings.Repeat("\u00e9", 210), "-tmp" + strings.Repeat("-", 196) + "-jvwydj"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := encodeCwd(tt.cwd); got != tt.want {
+				t.Errorf("encodeCwd() = %q (len %d), want %q", got, len(got), tt.want)
+			}
+		})
+	}
+}
+
+func TestProjectDirsForOptsLongPathPrefixFallback(t *testing.T) {
+	cfgDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfgDir)
+
+	abs, err := filepath.Abs("/" + strings.Repeat("a", 250))
+	if err != nil {
+		t.Fatalf("filepath.Abs: %v", err)
+	}
+	encoded := encodeCwd(abs)
+	// The CLI under Bun uses a different hash, so only the 200-char prefix matches.
+	cliDir := filepath.Join(cfgDir, "projects", encoded[:maxSanitizedLength]+"-bunhash")
+	if err := os.MkdirAll(cliDir, 0o750); err != nil {
+		t.Fatalf("creating project dir: %v", err)
+	}
+
+	dirs, err := projectDirsForOpts(sessionOpts{directory: abs})
+	if err != nil {
+		t.Fatalf("projectDirsForOpts() error: %v", err)
+	}
+	if len(dirs) != 1 || dirs[0] != cliDir {
+		t.Errorf("dirs = %v, want [%s]", dirs, cliDir)
+	}
+
+	t.Run("short path has no prefix fallback", func(t *testing.T) {
+		shortAbs, err := filepath.Abs("/short")
+		if err != nil {
+			t.Fatalf("filepath.Abs: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(cfgDir, "projects", encodeCwd(shortAbs)+"-x"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		dirs, err := projectDirsForOpts(sessionOpts{directory: shortAbs})
+		if err != nil {
+			t.Fatalf("projectDirsForOpts() error: %v", err)
+		}
+		if dirs != nil {
+			t.Errorf("dirs = %v, want nil", dirs)
+		}
+	})
+}
+
+func TestProjectDirsForOptsResolvesSymlinks(t *testing.T) {
+	cfgDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfgDir)
+
+	realDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(realDir, link); err != nil {
+		// Capability check, not an OS skip: Windows needs a privilege for symlinks.
+		t.Skipf("symlinks not available: %v", err)
+	}
+	dir := filepath.Join(cfgDir, "projects", encodeCwd(realDir))
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	o := sessionOpts{directory: link}
+	WithIncludeWorktrees(false)(&o)
+	dirs, err := projectDirsForOpts(o)
+	if err != nil {
+		t.Fatalf("projectDirsForOpts() error: %v", err)
+	}
+	if len(dirs) != 1 || dirs[0] != dir {
+		t.Errorf("dirs = %v, want [%s]", dirs, dir)
 	}
 }

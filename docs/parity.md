@@ -42,7 +42,8 @@ Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (5
 | `list_sessions(...)` | `ListSessions(opts...)` | PARITY |
 | `get_session_messages(session_id, ...)` | `GetSessionMessages(sessionID, opts...)` | PARITY |
 | `get_session_info(session_id, ...)` | `GetSessionInfo(sessionID, opts...)` | PARITY |
-| `rename_session`, `tag_session` | - | PENDING (README #16, #17) |
+| `rename_session(session_id, title, ...)` | `RenameSession(sessionID, title, opts...)` | PARITY |
+| `tag_session(session_id, tag, ...)` | `TagSession(sessionID, tag *string, opts...)` | PARTIAL (no NFKC: `golang.org/x/text` fix for GO-2026-5970 needs go 1.25; nil clears, as Python `None`) |
 | `delete_session`, `fork_session` | - | PENDING (README #32, post-snapshot P2) |
 | `list_subagents`, `get_subagent_messages` | - | PENDING (post-snapshot P4) |
 | `SessionStore` helpers (`*_from_store`, `*_via_store`, `import_session_to_store`) | - | PENDING (post-snapshot P6, P12) |
@@ -427,6 +428,7 @@ Go SDK provides idiomatic helper functions following the `os.IsNotExist` pattern
 | Partial message streaming | `include_partial_messages=True` | `WithPartialStreaming()` | PARITY |
 | Session options | `resume`, `fork_session` | `WithResume()`, `WithForkSession()` | PARITY |
 | Session listing | `list_sessions()`, `get_session_messages()`, `get_session_info()` | `ListSessions()`, `GetSessionMessages()`, `GetSessionInfo()` | PARITY |
+| Session title and tag | `rename_session()`, `tag_session()` | `RenameSession()`, `TagSession()` | PARTIAL (tags get no NFKC) |
 | Session store | `session_store` | - | PENDING (post-snapshot P6) |
 | File checkpointing | `enable_file_checkpointing` | `WithFileCheckpointing()` | PARITY |
 | File rewinding | `rewind_files(uuid)` | `RewindFiles(ctx, uuid)` | PARITY |

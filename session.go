@@ -102,3 +102,31 @@ func GetSessionMessages(sessionID string, opts ...SessionOption) ([]SessionMessa
 func GetSessionInfo(sessionID string, opts ...SessionOption) (*SDKSessionInfo, error) {
 	return session.GetSessionInfo(sessionID, opts...)
 }
+
+// RenameSession sets the title of a session. It appends a custom-title entry
+// to the session JSONL file, so the last call wins. The title is trimmed and
+// must not be empty. It returns an error when the session file is not found.
+//
+// Example:
+//
+//	err := claudecode.RenameSession(sessionID, "Refactor auth",
+//	    claudecode.WithSessionDirectory("/path/to/project"),
+//	)
+func RenameSession(sessionID, title string, opts ...SessionOption) error {
+	return session.RenameSession(sessionID, title, opts...)
+}
+
+// TagSession sets the tag of a session. A nil tag clears it. The tag is
+// Unicode-sanitized (invisible and format characters are removed) and
+// trimmed, and must not be empty after that. The last call wins.
+//
+// Example:
+//
+//	tag := "experiment"
+//	err := claudecode.TagSession(sessionID, &tag)
+//
+//	// Clear the tag
+//	err = claudecode.TagSession(sessionID, nil)
+func TagSession(sessionID string, tag *string, opts ...SessionOption) error {
+	return session.TagSession(sessionID, tag, opts...)
+}

@@ -130,4 +130,23 @@ func TestIntegrationSessionRoundTrip(t *testing.T) {
 	if !found {
 		t.Errorf("session %s not found in ListSessions() output", sessionID)
 	}
+
+	// Rename and tag the real session, then read both back.
+	if err := claudecode.RenameSession(sessionID, "session integration test"); err != nil {
+		t.Fatalf("RenameSession(%s) error: %v", sessionID, err)
+	}
+	tag := "integration"
+	if err := claudecode.TagSession(sessionID, &tag); err != nil {
+		t.Fatalf("TagSession(%s) error: %v", sessionID, err)
+	}
+	info, err = claudecode.GetSessionInfo(sessionID)
+	if err != nil || info == nil {
+		t.Fatalf("GetSessionInfo(%s) = %v, %v", sessionID, info, err)
+	}
+	if info.CustomTitle == nil || *info.CustomTitle != "session integration test" {
+		t.Errorf("CustomTitle = %v, want session integration test", info.CustomTitle)
+	}
+	if info.Tag == nil || *info.Tag != tag {
+		t.Errorf("Tag = %v, want %s", info.Tag, tag)
+	}
 }

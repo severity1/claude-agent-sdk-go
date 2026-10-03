@@ -139,3 +139,42 @@ func TestPublicGetSessionInfo(t *testing.T) {
 		t.Error("expected nil for nonexistent session")
 	}
 }
+
+func TestPublicRenameAndTagSession(t *testing.T) {
+	projDir := setupSessionTestProject(t)
+	const sessionID = "550e8400-e29b-41d4-a716-446655440000"
+	writeTestSession(t, projDir, sessionID, []map[string]any{
+		{"type": "user", "message": map[string]any{"role": "user", "content": "Hello"}, "uuid": "u1", "sessionId": sessionID},
+	})
+	dirOpt := claudecode.WithSessionDirectory("/test/project")
+
+	if err := claudecode.RenameSession(sessionID, "My session", dirOpt); err != nil {
+		t.Fatalf("RenameSession() error: %v", err)
+	}
+	tag := "experiment"
+	if err := claudecode.TagSession(sessionID, &tag, dirOpt); err != nil {
+		t.Fatalf("TagSession() error: %v", err)
+	}
+
+	info, err := claudecode.GetSessionInfo(sessionID, dirOpt)
+	if err != nil || info == nil {
+		t.Fatalf("GetSessionInfo() = %v, %v", info, err)
+	}
+	if info.CustomTitle == nil || *info.CustomTitle != "My session" {
+		t.Errorf("CustomTitle = %v, want My session", info.CustomTitle)
+	}
+	if info.Tag == nil || *info.Tag != tag {
+		t.Errorf("Tag = %v, want %s", info.Tag, tag)
+	}
+
+	if err := claudecode.TagSession(sessionID, nil, dirOpt); err != nil {
+		t.Fatalf("TagSession(nil) error: %v", err)
+	}
+	info, err = claudecode.GetSessionInfo(sessionID, dirOpt)
+	if err != nil || info == nil {
+		t.Fatalf("GetSessionInfo() = %v, %v", info, err)
+	}
+	if info.Tag != nil {
+		t.Errorf("Tag = %q, want nil after clear", *info.Tag)
+	}
+}

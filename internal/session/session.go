@@ -17,8 +17,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // errSessionNotFound is a sentinel error returned by findSessionFile when
@@ -267,6 +269,154 @@ func GetSessionInfo(sessionID string, opts ...Option) (*SDKSessionInfo, error) {
 	return buildSessionInfoFromFile(sessionID, path)
 }
 
+// uuidPattern matches a session ID (Python SDK _UUID_RE).
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// customTitleEntry and tagEntry keep the Python SDK key order on the wire.
+type customTitleEntry struct {
+	Type        string `json:"type"`
+	CustomTitle string `json:"customTitle"`
+	SessionID   string `json:"sessionId"`
+}
+
+type tagEntry struct {
+	Type      string `json:"type"`
+	Tag       string `json:"tag"`
+	SessionID string `json:"sessionId"`
+}
+
+// RenameSession sets the title of a session. It appends a custom-title entry
+// to the session JSONL file; the last entry wins. The title is trimmed and
+// must not be empty. Use WithSessionDirectory to search one project only.
+func RenameSession(sessionID, title string, opts ...Option) error {
+	if !uuidPattern.MatchString(sessionID) {
+		return fmt.Errorf("invalid session_id: %s", sessionID)
+	}
+	// Empty titles are rejected, not used to clear the title (CLI behavior).
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return errors.New("title must be non-empty")
+	}
+	return appendEntry(sessionID, customTitleEntry{Type: "custom-title", CustomTitle: title, SessionID: sessionID}, opts)
+}
+
+// TagSession sets the tag of a session, or clears it when tag is nil. It
+// appends a tag entry to the session JSONL file; the last entry wins. The tag
+// is Unicode-sanitized and trimmed, and must not be empty after that.
+func TagSession(sessionID string, tag *string, opts ...Option) error {
+	if !uuidPattern.MatchString(sessionID) {
+		return fmt.Errorf("invalid session_id: %s", sessionID)
+	}
+	value := "" // readers treat an empty tag as cleared
+	if tag != nil {
+		value = strings.TrimSpace(sanitizeUnicode(*tag))
+		if value == "" {
+			return errors.New("tag must be non-empty (use nil to clear)")
+		}
+	}
+	return appendEntry(sessionID, tagEntry{Type: "tag", Tag: value, SessionID: sessionID}, opts)
+}
+
+// appendEntry encodes entry as one JSONL line and appends it to the session file.
+func appendEntry(sessionID string, entry any, opts []Option) error {
+	o := defaultOpts()
+	for _, fn := range opts {
+		fn(&o)
+	}
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	// Keep <, > and & as is, like the CLI's own JSON.stringify output.
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(entry); err != nil {
+		return fmt.Errorf("encoding session entry: %w", err)
+	}
+	return appendToSession(sessionID, buf.Bytes(), o)
+}
+
+// appendToSession appends data to the first non-empty session file found in
+// the project directories, in search order (Python SDK _append_to_session).
+func appendToSession(sessionID string, data []byte, o sessionOpts) error {
+	dirs, err := projectDirsForOpts(o)
+	if err != nil {
+		return err
+	}
+	for _, dir := range dirs {
+		ok, err := tryAppend(filepath.Join(dir, sessionID+".jsonl"), data)
+		if err != nil {
+			return fmt.Errorf("appending to session %s: %w", sessionID, err)
+		}
+		if ok {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s", errSessionNotFound, sessionID)
+}
+
+// tryAppend appends data to an existing file. It returns false when the file
+// does not exist or is empty: an empty file is a stub, so the search goes on.
+// The open has no O_CREATE, so a missing file is never created.
+func tryAppend(path string, data []byte) (ok bool, err error) {
+	f, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			ok, err = false, cerr
+		}
+	}()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	if fi.Size() == 0 {
+		return false, nil
+	}
+	if _, err := f.Write(data); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// strippedRanges are the explicit ranges the Python and TS SDKs strip. Most
+// are also in Cf or Co; they are kept to match the reference exactly.
+var strippedRanges = &unicode.RangeTable{
+	R16: []unicode.Range16{
+		{Lo: 0x200b, Hi: 0x200f, Stride: 1},
+		{Lo: 0x202a, Hi: 0x202e, Stride: 1},
+		{Lo: 0x2066, Hi: 0x2069, Stride: 1},
+		{Lo: 0xe000, Hi: 0xf8ff, Stride: 1},
+		{Lo: 0xfeff, Hi: 0xfeff, Stride: 1},
+	},
+}
+
+// sanitizeUnicode removes format (Cf), private-use (Co) and unassigned (Cn)
+// runes, so that invisible characters cannot hide inside a tag (Python SDK
+// _sanitize_unicode). Without normalization one pass is final.
+func sanitizeUnicode(value string) string {
+	// Python also applies NFKC (NFC for paths); golang.org/x/text is not used (GO-2026-5970 fix needs go 1.25).
+	return strings.Map(dropUnsafeRune, value)
+}
+
+func dropUnsafeRune(r rune) rune {
+	if unicode.In(r, unicode.Cf, unicode.Co, strippedRanges) || isUnassigned(r) {
+		return -1
+	}
+	return r
+}
+
+// isUnassigned reports an unassigned (Cn) rune. The categories are listed one
+// by one because unicode.C includes Cn only from Go 1.25.
+func isUnassigned(r rune) bool {
+	return !unicode.In(r, unicode.L, unicode.M, unicode.N, unicode.P, unicode.S, unicode.Z,
+		unicode.Cc, unicode.Cf, unicode.Co, unicode.Cs)
+}
+
 // configDir returns the Claude configuration directory.
 func configDir() (string, error) {
 	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
@@ -309,7 +459,29 @@ func getWorktreePaths(dir string) []string {
 	return paths
 }
 
-// encodeCwd encodes a directory path by replacing non-alphanumeric characters with "-".
+// maxSanitizedLength is the longest encoded project dir name the CLI keeps
+// before it cuts the name and adds a hash suffix.
+const maxSanitizedLength = 200
+
+// simpleHash is the JS 32-bit string hash in base36 that the CLI uses for
+// long project dir names (Python SDK _simple_hash). int32 arithmetic gives
+// the same wrap as JS `hash |= 0`.
+func simpleHash(s string) string {
+	var h int32
+	for _, r := range s {
+		h = (h << 5) - h + r
+	}
+	n := int64(h)
+	if n < 0 {
+		n = -n
+	}
+	return strconv.FormatInt(n, 36)
+}
+
+// encodeCwd encodes a directory path by replacing non-alphanumeric characters
+// with "-". A result longer than maxSanitizedLength is cut and gets a
+// "-<simpleHash>" suffix (Python SDK _sanitize_path). The result is ASCII, so
+// the byte length is the rune length.
 func encodeCwd(cwd string) string {
 	var b strings.Builder
 	b.Grow(len(cwd))
@@ -320,7 +492,57 @@ func encodeCwd(cwd string) string {
 			b.WriteByte('-')
 		}
 	}
-	return b.String()
+	encoded := b.String()
+	if len(encoded) <= maxSanitizedLength {
+		return encoded
+	}
+	return encoded[:maxSanitizedLength] + "-" + simpleHash(cwd)
+}
+
+// canonicalizePath resolves symlinks, so the path matches the cwd that the
+// CLI used for the project dir name (Python SDK _canonicalize_path). A path
+// that does not exist stays absolute only.
+func canonicalizePath(dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	// Python also applies NFKC (NFC for paths); golang.org/x/text is not used (GO-2026-5970 fix needs go 1.25).
+	return abs, nil
+}
+
+// findProjectDir returns the project dir for path. For a long path it falls
+// back to the first dir with the same 200-char prefix, because the CLI under
+// Bun uses a different hash suffix (Python SDK _find_project_dir).
+func findProjectDir(projectsDir, path string) (string, bool) {
+	encoded := encodeCwd(path)
+	exact := filepath.Join(projectsDir, encoded)
+	if fi, err := os.Stat(exact); err == nil && fi.IsDir() {
+		return exact, true
+	}
+	if len(encoded) <= maxSanitizedLength {
+		return "", false
+	}
+
+	names, err := readDirNames(projectsDir)
+	if err != nil {
+		return "", false
+	}
+	sort.Strings(names) // a stable choice when several dirs match
+	prefix := encoded[:maxSanitizedLength] + "-"
+	for _, name := range names {
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		full := filepath.Join(projectsDir, name)
+		if fi, err := os.Stat(full); err == nil && fi.IsDir() {
+			return full, true
+		}
+	}
+	return "", false
 }
 
 // projectDirsForOpts returns the project directories to search based on options.
@@ -334,30 +556,27 @@ func projectDirsForOpts(o sessionOpts) ([]string, error) {
 	projectsDir := filepath.Join(cfgDir, "projects")
 
 	if o.directory != "" {
-		abs, err := filepath.Abs(o.directory)
+		canonical, err := canonicalizePath(o.directory)
 		if err != nil {
 			return nil, fmt.Errorf("resolving directory: %w", err)
 		}
 
 		// Collect all candidate directories: user's dir first, then worktrees.
-		candidatePaths := []string{abs}
+		candidatePaths := []string{canonical}
 		if o.includeWorktreesEnabled() {
-			candidatePaths = append(candidatePaths, getWorktreePaths(abs)...)
+			candidatePaths = append(candidatePaths, getWorktreePaths(canonical)...)
 		}
 
-		// Encode each candidate path and collect existing project dirs.
+		// Find the project dir of each candidate path, without duplicates.
 		seen := make(map[string]bool)
 		var dirs []string
 		for _, p := range candidatePaths {
-			encoded := encodeCwd(p)
-			dir := filepath.Join(projectsDir, encoded)
-			if seen[dir] {
+			dir, ok := findProjectDir(projectsDir, p)
+			if !ok || seen[dir] {
 				continue
 			}
 			seen[dir] = true
-			if _, err := os.Stat(dir); err == nil {
-				dirs = append(dirs, dir)
-			}
+			dirs = append(dirs, dir)
 		}
 		if len(dirs) == 0 {
 			return nil, nil
