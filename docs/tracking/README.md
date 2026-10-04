@@ -12,7 +12,7 @@ Tracks all Python SDK PRs that need to be replayed into the Go SDK to restore pa
 | Last ported feature | Go PR #99 (Jan 24, 2026) - tool_use_result (Python PR #495) |
 | Python SDK at checkpoint | v0.1.22 |
 | Python SDK at snapshot | v0.1.58 |
-| Go status verified | rows #12, #16, #17, #20 and #31 against Go v0.8.0 (6c9d76f, Oct 4, 2026); rows #6, #14, #18, #29 and #43 against Go main 58cf570 (v0.7.1, Oct 1, 2026); rows #14a and #30 against Go PR #163 |
+| Go status verified | rows #10 and #11 against Go main de83b7d (Oct 4, 2026); rows #12, #16, #17, #20 and #31 against Go v0.8.0 (6c9d76f, Oct 4, 2026); rows #6, #14, #18, #29 and #43 against Go main 58cf570 (v0.7.1, Oct 1, 2026); rows #14a and #30 against Go PR #163 |
 
 PRs merged after April 12, 2026 do not belong in this file. They are tracked in [post-snapshot.md](post-snapshot.md), which keeps the snapshot above stable as the canonical Phase 1-4 record.
 

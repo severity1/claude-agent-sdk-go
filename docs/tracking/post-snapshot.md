@@ -10,7 +10,7 @@ The schema mirrors `README.md` so rows can be moved between files if the snapsho
 |:------|:------|
 | Coverage start | April 13, 2026 |
 | Coverage end | last intake Sep 30, 2026 (Python db750b2), still rolling |
-| Go status verified | rows P1, P5 and P40 against Go v0.8.0 (6c9d76f, Oct 4, 2026); rows P25, P31, P41 and P44 against Go main 58cf570 (v0.7.1, Oct 1, 2026); rows P17 and P32 against Go PR #163; other rows against a5535fb |
+| Go status verified | row P27 against Go main de83b7d (Oct 4, 2026); rows P1, P5 and P40 against Go v0.8.0 (6c9d76f, Oct 4, 2026); rows P25, P31, P41 and P44 against Go main 58cf570 (v0.7.1, Oct 1, 2026); rows P17 and P32 against Go PR #163; other rows against a5535fb |
 | Companion file | [README.md](README.md) (Jan 6 - Apr 12, 2026 snapshot) |
 
 ## Scope rules
