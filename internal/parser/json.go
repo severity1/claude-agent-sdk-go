@@ -406,6 +406,10 @@ func (p *Parser) parseContentBlock(blockData any) (shared.ContentBlock, error) {
 		return p.parseToolUseBlock(data)
 	case shared.ContentBlockTypeToolResult:
 		return p.parseToolResultBlock(data)
+	case shared.ContentBlockTypeServerToolUse:
+		return parseServerToolUseBlock(data)
+	case shared.ContentBlockTypeAdvisorToolResult:
+		return parseServerToolResultBlock(data)
 	default:
 		return nil, nil
 	}
@@ -448,6 +452,43 @@ func (p *Parser) parseToolUseBlock(data map[string]any) (shared.ContentBlock, er
 		ToolUseID: id,
 		Name:      name,
 		Input:     input,
+	}, nil
+}
+
+func parseServerToolUseBlock(data map[string]any) (shared.ContentBlock, error) {
+	id, ok := data["id"].(string)
+	if !ok {
+		return nil, shared.NewMessageParseError("server_tool_use block missing id field", data)
+	}
+	name, ok := data["name"].(string)
+	if !ok {
+		return nil, shared.NewMessageParseError("server_tool_use block missing name field", data)
+	}
+	input, ok := data["input"].(map[string]any)
+	if !ok {
+		return nil, shared.NewMessageParseError("server_tool_use block missing input field", data)
+	}
+	return &shared.ServerToolUseBlock{
+		MessageType: shared.ContentBlockTypeServerToolUse,
+		ID:          id,
+		Name:        shared.ServerToolName(name),
+		Input:       input,
+	}, nil
+}
+
+func parseServerToolResultBlock(data map[string]any) (shared.ContentBlock, error) {
+	toolUseID, ok := data["tool_use_id"].(string)
+	if !ok {
+		return nil, shared.NewMessageParseError("advisor_tool_result block missing tool_use_id field", data)
+	}
+	content, ok := data["content"].(map[string]any)
+	if !ok {
+		return nil, shared.NewMessageParseError("advisor_tool_result block missing content field", data)
+	}
+	return &shared.ServerToolResultBlock{
+		MessageType: shared.ContentBlockTypeAdvisorToolResult,
+		ToolUseID:   toolUseID,
+		Content:     content,
 	}, nil
 }
 

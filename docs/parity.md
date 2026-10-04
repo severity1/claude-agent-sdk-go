@@ -24,7 +24,7 @@ Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (d
 | Client methods | 15 | 16 | 12 Python methods have a Go equivalent; 3 are pending; Go adds `QueryStream`, `GetStreamIssues`, `GetStreamStats` |
 | Hook events | 10 | 10 | All 10 events ported |
 | Message types (top level) | 7 | 7 (+`RawControlMessage`) | All 7 ported; Python also has 6 typed `SystemMessage` subclasses: Go has the 4 task ones as typed views of `SystemMessage`, 2 are pending |
-| Content block types | 6 | 4 | `ServerToolUseBlock` and `ServerToolResultBlock` pending |
+| Content block types | 6 | 6 | All 6 ported |
 | Error types | 7 | 6 (+`BaseError`) | `ResultError` pending |
 | Permission modes | 6 | 4 | `dontAsk` and `auto` pending |
 | Option fields | 49 (`ClaudeAgentOptions`) | 41 (`Options`), 64 `With*` constructors | See the option table for the missing fields |
@@ -231,8 +231,8 @@ These contributor PRs merged on Oct 4, 2026, after v0.8.0. The table maps each o
 | `ThinkingBlock` | `ThinkingBlock` struct | PARITY |
 | `ToolUseBlock` | `ToolUseBlock` struct | PARITY |
 | `ToolResultBlock` | `ToolResultBlock` struct | PARITY |
-| `ServerToolUseBlock` | - | PENDING (post-snapshot P8) |
-| `ServerToolResultBlock` | - | PENDING (post-snapshot P8) |
+| `ServerToolUseBlock` | `ServerToolUseBlock` struct | PARITY (`Name` is `ServerToolName`) |
+| `ServerToolResultBlock` | `ServerToolResultBlock` struct | PARITY |
 
 ### Content Block Type Constants
 
@@ -242,7 +242,7 @@ These contributor PRs merged on Oct 4, 2026, after v0.8.0. The table maps each o
 | `"thinking"` | `ContentBlockTypeThinking` | PARITY |
 | `"tool_use"` | `ContentBlockTypeToolUse` | PARITY |
 | `"tool_result"` | `ContentBlockTypeToolResult` | PARITY |
-| `"server_tool_use"`, `"advisor_tool_result"` | - | PENDING (post-snapshot P8) |
+| `"server_tool_use"`, `"advisor_tool_result"` | `ContentBlockTypeServerToolUse`, `ContentBlockTypeAdvisorToolResult` | PARITY |
 
 ---
 
@@ -251,7 +251,7 @@ These contributor PRs merged on Oct 4, 2026, after v0.8.0. The table maps each o
 | Python SDK | Go SDK | Status |
 |:-----------|:-------|:-------|
 | `ClaudeSDKError` | `SDKError` interface + `BaseError` | PARITY |
-| `CLIConnectionError` | `ConnectionError` | PARITY |
+| `CLIConnectionError` | `ConnectionError` | PARITY (also returned by `Client` methods when not connected, wrapping `ErrNotConnected`) |
 | `CLINotFoundError` | `CLINotFoundError` | PARITY |
 | `ProcessError` | `ProcessError` | PARITY |
 | `ResultError` | - | PENDING (post-snapshot P44) |

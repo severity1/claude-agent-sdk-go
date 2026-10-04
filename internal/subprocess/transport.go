@@ -39,6 +39,9 @@ type Transport struct {
 	entrypoint string // CLAUDE_CODE_ENTRYPOINT value (sdk-go or sdk-go-client)
 	// processDone closes after the sole cmd.Wait call returns.
 	processDone chan struct{}
+	// exit is guarded by exitMu, not mu, so Done and Err never wait for Close.
+	exitMu sync.Mutex
+	exit   *processExit
 
 	// Connection state
 	connected bool
@@ -133,12 +136,12 @@ var closedDone = func() chan struct{} {
 // Connect exits, on its own or through Close. It does not wait for stdout
 // EOF. Before Connect and after Close it returns a closed channel.
 func (t *Transport) Done() <-chan struct{} {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	if t.processDone == nil {
+	t.exitMu.Lock()
+	defer t.exitMu.Unlock()
+	if t.exit == nil {
 		return closedDone
 	}
-	return t.processDone
+	return t.exit.done
 }
 
 // Err returns nil while the CLI process runs. Once Done is closed it returns
@@ -146,15 +149,18 @@ func (t *Transport) Done() <-chan struct{} {
 // a *shared.ConnectionError for a clean exit, and a not-connected error
 // before Connect and after Close.
 func (t *Transport) Err() error {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	if t.processDone == nil {
+	t.exitMu.Lock()
+	exit := t.exit
+	t.exitMu.Unlock()
+	if exit == nil {
 		return fmt.Errorf("transport not connected")
 	}
-	if !t.processExitedLocked() {
+	select {
+	case <-exit.done:
+		return exit.err
+	default:
 		return nil
 	}
-	return exitReason(t.cmd.ProcessState)
 }
 
 // Connect starts the Claude CLI subprocess.
@@ -331,7 +337,7 @@ func (t *Transport) openStdin() (*stdinWriter, error) {
 	}
 	if t.processExitedLocked() {
 		// Python raises CLIConnectionError from the exit error.
-		return nil, shared.NewConnectionError("cannot write to terminated CLI process", exitReason(t.cmd.ProcessState))
+		return nil, shared.NewConnectionError("cannot write to terminated CLI process", t.Err())
 	}
 	return t.stdin, nil
 }

@@ -54,7 +54,10 @@ func processExitError(state *os.ProcessState, lastErrorResult string) *shared.Pr
 
 // exitReason says why an exited CLI can no longer serve a turn: a
 // ProcessError for a failure, a ConnectionError for a clean exit.
-func exitReason(state *os.ProcessState) error {
+func exitReason(state *os.ProcessState, waitErr error) error {
+	if state == nil {
+		return shared.NewConnectionError("Claude Code process exited", waitErr)
+	}
 	if state.Success() {
 		return shared.NewConnectionError(fmt.Sprintf("Claude Code process exited (%s)", state), nil)
 	}

@@ -41,7 +41,7 @@ subprocess/
 <!-- AUTO-MANAGED: conventions -->
 ## Module-Specific Conventions
 
-- Wait ownership: `startProcessWaiter()` runs right after `cmd.Start()` and is the only `cmd.Wait()` caller; it closes `processDone`. `terminateProcess()` returns at once if `processDone` is closed, else SIGTERM, then 5s (or ctx done), then SIGKILL, always waiting on `processDone`. stdout EOF is not proof of exit. `isProcessAlreadyFinishedError()` also treats the Windows `"Access is denied"` as a non-error
+- Wait ownership: `startProcessWaiter()` runs right after `cmd.Start()` and is the only `cmd.Wait()` caller; it sets `t.exit` (`*processExit{done, err}`, `exitReason(cmd.ProcessState, waitErr)`, nil state gives a `ConnectionError`) under `exitMu` and then closes `processDone`; `Done()/Err()` read `t.exit` under `exitMu`, never `t.mu`, and cleanup clears it. `terminateProcess()` returns at once if `processDone` is closed, else SIGTERM, then 5s (or ctx done), then SIGKILL, always waiting on `processDone`. stdout EOF is not proof of exit. `isProcessAlreadyFinishedError()` also treats the Windows `"Access is denied"` as a non-error
 - Child output pipes: stdout and the stderr callback use `os.Pipe()` via `newChildOutputPipe()`, not `cmd.StdoutPipe()`/`StderrPipe()`, because `cmd.Wait()` closes those readers on exit and drops buffered output. The parent closes `childPipeEnds` after `Start()`. Readers drain to EOF (Python reads stdout to EOF, then calls `process.wait()`)
 - Stderr callback: delivers every line already read, also after ctx cancel (Python never drops a read line); the loop ends on EOF or when cleanup closes the pipe
 - Message routing: Distinguish control vs regular messages by type

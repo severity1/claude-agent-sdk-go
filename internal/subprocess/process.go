@@ -26,13 +26,24 @@ func isProcessAlreadyFinishedError(err error) bool {
 // exec.Cmd forbids a second Wait, so other code waits on processDone instead
 // (the Go equivalent of Python's idempotent process.wait()).
 func (t *Transport) startProcessWaiter() {
-	done := make(chan struct{})
+	exit := &processExit{done: make(chan struct{})}
 	cmd := t.cmd
-	t.processDone = done
+	t.processDone = exit.done
+	t.exitMu.Lock()
+	t.exit = exit
+	t.exitMu.Unlock()
 	go func() {
-		_ = cmd.Wait()
-		close(done)
+		waitErr := cmd.Wait()
+		exit.err = exitReason(cmd.ProcessState, waitErr)
+		close(exit.done)
 	}()
+}
+
+// processExit records the exit of one CLI process. err is written once,
+// before done closes, so readers that saw done closed need no lock.
+type processExit struct {
+	done chan struct{}
+	err  error
 }
 
 // terminateProcess runs after stdin is closed (Python close()): wait 5s for
@@ -109,4 +120,7 @@ func (t *Transport) cleanup() {
 	// Reset state
 	t.cmd = nil
 	t.processDone = nil
+	t.exitMu.Lock()
+	t.exit = nil
+	t.exitMu.Unlock()
 }

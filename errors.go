@@ -1,8 +1,25 @@
 package claudecode
 
 import (
+	"errors"
+
+	"github.com/severity1/claude-agent-sdk-go/internal/control"
 	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
+
+// ErrNotConnected is wrapped by the *ConnectionError that Client methods
+// return before Connect or after Disconnect. Match it with errors.Is.
+var ErrNotConnected = errors.New("client not connected")
+
+// ErrProtocolClosed is returned by a control request (for example Interrupt
+// or SetModel) that still waits for its response when the connection closes.
+// Match it with errors.Is.
+var ErrProtocolClosed = control.ErrProtocolClosed
+
+// notConnectedError is the error for a call on a client that is not connected.
+func notConnectedError() error {
+	return NewConnectionError("not connected, call Connect first", ErrNotConnected)
+}
 
 // SDKError represents the base interface for all SDK errors.
 type SDKError = shared.SDKError

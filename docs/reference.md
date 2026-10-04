@@ -521,7 +521,7 @@ func (c *ClientImpl) Done() <-chan struct{}
 
 #### `Err()`
 
-Get why the CLI process stopped. Returns nil while it runs, a `*ProcessError` for a non-zero exit (`ExitCode` is -1 for a signal), a `*ConnectionError` for a clean exit, and a "client not connected" error before `Connect()` and after `Disconnect()`. Once the process is gone, `Query`, `QueryWithSession`, `QueryStream`, `Interrupt`, `SetModel`, `SetPermissionMode`, `RewindFiles` and `GetMcpStatus` return a `*ConnectionError` that wraps it (Python raises `CLIConnectionError` from the exit error).
+Get why the CLI process stopped. Returns nil while it runs, a `*ProcessError` for a non-zero exit (`ExitCode` is -1 for a signal), a `*ConnectionError` for a clean exit, and a `*ConnectionError` that wraps `ErrNotConnected` before `Connect()` and after `Disconnect()`. `Done()` and `Err()` never wait for a running `Disconnect()`. Once the process is gone, `Query`, `QueryWithSession`, `QueryStream`, `Interrupt`, `SetModel`, `SetPermissionMode`, `RewindFiles` and `GetMcpStatus` return a `*ConnectionError` that wraps it (Python raises `CLIConnectionError` from the exit error).
 
 ```go
 func (c *ClientImpl) Err() error
@@ -1376,7 +1376,7 @@ Methods (see [Task Messages](#task-messages)):
 
 ### Task Messages
 
-The CLI reports tasks (subagents started by the Agent/Task tool, background Bash commands) as `system` messages with the subtypes `task_started`, `task_progress`, `task_notification` and `task_updated`. They arrive on the stream as `*SystemMessage`, like every other system message. The `AsTask*` methods return the typed form; each typed message embeds the `SystemMessage`, so `Subtype` and the raw `Data` (including fields the typed form does not model) stay available.
+The CLI reports tasks (subagents started by the Agent/Task tool, background Bash commands) as `system` messages with the subtypes `task_started`, `task_progress`, `task_notification` and `task_updated`. They arrive on the stream as `*SystemMessage`, like every other system message, so a `case *claudecode.TaskStartedMessage` in a type switch never matches. The `AsTask*` methods return the typed form; each typed message embeds the `SystemMessage`, so `Subtype` and the raw `Data` (including fields the typed form does not model) stay available.
 
 ```go
 switch msg := message.(type) {
@@ -1645,14 +1645,41 @@ type ToolResultBlock struct {
 }
 ```
 
+### `ServerToolUseBlock`
+
+A call to a tool that the API runs on the server side (for example `advisor` or `web_search`). The caller sends no result for it.
+
+```go
+type ServerToolUseBlock struct {
+    MessageType string
+    ID          string
+    Name        ServerToolName // ServerToolNameAdvisor, ServerToolNameWebSearch, ...
+    Input       map[string]any
+}
+```
+
+### `ServerToolResultBlock`
+
+The result of a server-side tool call. `Content` is the raw object from the API; its `"type"` key names the result schema.
+
+```go
+type ServerToolResultBlock struct {
+    MessageType string
+    ToolUseID   string
+    Content     map[string]any
+}
+```
+
 ### Content Block Type Constants
 
 ```go
 const (
-    ContentBlockTypeText       = "text"
-    ContentBlockTypeThinking   = "thinking"
-    ContentBlockTypeToolUse    = "tool_use"
-    ContentBlockTypeToolResult = "tool_result"
+    ContentBlockTypeText              = "text"
+    ContentBlockTypeThinking          = "thinking"
+    ContentBlockTypeToolUse           = "tool_use"
+    ContentBlockTypeToolResult        = "tool_result"
+    ContentBlockTypeServerToolUse     = "server_tool_use"
+    ContentBlockTypeAdvisorToolResult = "advisor_tool_result"
 )
 ```
 
@@ -2731,6 +2758,22 @@ Sentinel error indicating no more messages.
 
 ```go
 var ErrNoMoreMessages = errors.New("no more messages")
+```
+
+### `ErrNotConnected`
+
+Wrapped by the `*ConnectionError` that `Client` methods return before `Connect()` or after `Disconnect()`.
+
+```go
+if errors.Is(err, claudecode.ErrNotConnected) { /* call Connect first */ }
+```
+
+### `ErrProtocolClosed`
+
+Returned by a control request (for example `Interrupt` or `SetModel`) that still waits for its response when the connection closes.
+
+```go
+if errors.Is(err, claudecode.ErrProtocolClosed) { /* the connection closed */ }
 ```
 
 ---

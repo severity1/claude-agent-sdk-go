@@ -202,10 +202,24 @@ func appendThinkingDisplay(args []string, display ThinkingDisplay) []string {
 	return append(args, "--thinking-display", string(display))
 }
 
-// ThinkingArgs returns the CLI flags for cfg, or nil when cfg is nil.
+// ThinkingArgs returns the CLI flags for cfg, or nil when cfg is nil or a
+// typed nil pointer.
 func ThinkingArgs(cfg ThinkingConfig) []string {
-	if cfg == nil {
+	switch c := cfg.(type) {
+	case nil:
 		return nil
+	case *ThinkingConfigAdaptive:
+		if c == nil {
+			return nil
+		}
+	case *ThinkingConfigEnabled:
+		if c == nil {
+			return nil
+		}
+	case *ThinkingConfigDisabled:
+		if c == nil {
+			return nil
+		}
 	}
 	return cfg.thinkingArgs()
 }

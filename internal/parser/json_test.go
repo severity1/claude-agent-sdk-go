@@ -1502,6 +1502,78 @@ func TestParseConversationResetMessage(t *testing.T) {
 	}
 }
 
+// TestParseServerToolBlocks tests server_tool_use and advisor_tool_result blocks.
+func TestParseServerToolBlocks(t *testing.T) {
+	parser := setupParserTest(t)
+	msg, err := parser.ParseMessage(map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"model": "claude-test",
+			"content": []any{
+				map[string]any{
+					"type":  "server_tool_use",
+					"id":    "srvtoolu_1",
+					"name":  "advisor",
+					"input": map[string]any{"question": "q"},
+				},
+				map[string]any{
+					"type":        "advisor_tool_result",
+					"tool_use_id": "srvtoolu_1",
+					"content":     map[string]any{"type": "advisor_result", "text": "a"},
+				},
+			},
+		},
+	})
+	assertParseSuccess(t, err, msg)
+	assistant, ok := msg.(*shared.AssistantMessage)
+	if !ok || len(assistant.Content) != 2 {
+		t.Fatalf("Expected an assistant message with 2 blocks, got %#v", msg)
+		return
+	}
+
+	use, ok := assistant.Content[0].(*shared.ServerToolUseBlock)
+	if !ok {
+		t.Fatalf("Expected *shared.ServerToolUseBlock, got %T", assistant.Content[0])
+		return
+	}
+	if use.BlockType() != shared.ContentBlockTypeServerToolUse || use.ID != "srvtoolu_1" ||
+		use.Name != shared.ServerToolNameAdvisor || use.Input["question"] != "q" {
+		t.Errorf("Unexpected server tool use block: %+v", use)
+	}
+
+	result, ok := assistant.Content[1].(*shared.ServerToolResultBlock)
+	if !ok {
+		t.Fatalf("Expected *shared.ServerToolResultBlock, got %T", assistant.Content[1])
+		return
+	}
+	if result.BlockType() != shared.ContentBlockTypeAdvisorToolResult || result.ToolUseID != "srvtoolu_1" ||
+		result.Content["text"] != "a" {
+		t.Errorf("Unexpected server tool result block: %+v", result)
+	}
+}
+
+// TestParseServerToolBlockErrors tests that a missing required key gives a parse error.
+func TestParseServerToolBlockErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		block       map[string]any
+		expectError string
+	}{
+		{"use_missing_id", map[string]any{"type": "server_tool_use", "name": "advisor", "input": map[string]any{}}, "server_tool_use block missing id field"},
+		{"use_missing_name", map[string]any{"type": "server_tool_use", "id": "s1", "input": map[string]any{}}, "server_tool_use block missing name field"},
+		{"use_missing_input", map[string]any{"type": "server_tool_use", "id": "s1", "name": "advisor"}, "server_tool_use block missing input field"},
+		{"result_missing_tool_use_id", map[string]any{"type": "advisor_tool_result", "content": map[string]any{}}, "advisor_tool_result block missing tool_use_id field"},
+		{"result_missing_content", map[string]any{"type": "advisor_tool_result", "tool_use_id": "s1"}, "advisor_tool_result block missing content field"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := setupParserTest(t).parseContentBlock(test.block)
+			assertParseError(t, err, test.expectError)
+		})
+	}
+}
+
 // Mock and Helper Functions
 
 func assertTextBlocks(t *testing.T, blocks []shared.ContentBlock, want ...string) {

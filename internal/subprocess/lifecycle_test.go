@@ -423,6 +423,34 @@ func TestTransportCloseReportsNoProcessError(t *testing.T) {
 
 // TestTransportDoneReportsCLIExit verifies that Done closes when the CLI
 // exits on its own and that Err then says why.
+// TestTransportDoneAndErrDoNotTakeTransportLock verifies that Done and Err
+// return while another goroutine holds t.mu, as Close does during teardown.
+func TestTransportDoneAndErrDoNotTakeTransportLock(t *testing.T) {
+	ctx, cancel := setupTransportTestContext(t, 30*time.Second)
+	defer cancel()
+
+	transport := New(newTransportMockCLIMode(t, mockModeDefault), &shared.Options{}, "sdk-go")
+	t.Cleanup(func() { _ = transport.Close() })
+	connectTransportSafely(ctx, t, transport)
+
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+
+	returned := make(chan error, 1)
+	go func() {
+		_ = transport.Done()
+		returned <- transport.Err()
+	}()
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Fatalf("Err() = %v while the CLI runs, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Done() or Err() blocked on the transport lock")
+	}
+}
+
 func TestTransportDoneReportsCLIExit(t *testing.T) {
 	tests := []struct {
 		name string

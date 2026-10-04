@@ -224,6 +224,22 @@ func TestThinkingFlagSupport(t *testing.T) {
 			notWants: []string{"9000"},
 		},
 		{
+			name:     "typed nil adaptive is treated as unset",
+			options:  &shared.Options{Thinking: (*shared.ThinkingConfigAdaptive)(nil), MaxThinkingTokens: 3000},
+			want:     [][2]string{{"--max-thinking-tokens", "3000"}},
+			notWants: []string{"--thinking"},
+		},
+		{
+			name:     "typed nil enabled is treated as unset",
+			options:  &shared.Options{Thinking: (*shared.ThinkingConfigEnabled)(nil)},
+			notWants: []string{"--thinking", "--max-thinking-tokens"},
+		},
+		{
+			name:     "typed nil disabled is treated as unset",
+			options:  &shared.Options{Thinking: (*shared.ThinkingConfigDisabled)(nil)},
+			notWants: []string{"--thinking", "--max-thinking-tokens"},
+		},
+		{
 			name: "disabled takes precedence over max thinking tokens",
 			options: &shared.Options{
 				MaxThinkingTokens: 9000,

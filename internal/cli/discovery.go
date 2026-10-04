@@ -263,8 +263,8 @@ func addModelAndPromptFlags(cmd []string, options *shared.Options) []string {
 }
 
 func addThinkingFlags(cmd []string, options *shared.Options) []string {
-	if options.Thinking != nil {
-		return append(cmd, shared.ThinkingArgs(options.Thinking)...)
+	if args := shared.ThinkingArgs(options.Thinking); args != nil {
+		return append(cmd, args...)
 	}
 	if options.MaxThinkingTokens > 0 {
 		cmd = append(cmd, "--max-thinking-tokens", strconv.Itoa(options.MaxThinkingTokens))

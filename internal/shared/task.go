@@ -59,59 +59,67 @@ type TaskUsage struct {
 }
 
 // TaskStartedMessage is the typed form of a task_started system message.
-// The embedded SystemMessage keeps the subtype and the raw payload.
+// The embedded SystemMessage keeps the subtype and the raw payload, and
+// json.Marshal writes that raw payload. The parser always returns
+// *SystemMessage, so get this type with an AsTask* method, not a type switch.
 type TaskStartedMessage struct {
 	SystemMessage
-	TaskID      string  `json:"task_id"`
-	Description string  `json:"description"`
-	UUID        string  `json:"uuid"`
-	SessionID   string  `json:"session_id"`
-	ToolUseID   *string `json:"tool_use_id,omitempty"`
-	TaskType    *string `json:"task_type,omitempty"`
+	TaskID      string
+	Description string
+	UUID        string
+	SessionID   string
+	ToolUseID   *string
+	TaskType    *string
 }
 
 // TaskProgressMessage is the typed form of a task_progress system message.
-// The embedded SystemMessage keeps the subtype and the raw payload.
+// The embedded SystemMessage keeps the subtype and the raw payload, and
+// json.Marshal writes that raw payload. The parser always returns
+// *SystemMessage, so get this type with an AsTask* method, not a type switch.
 type TaskProgressMessage struct {
 	SystemMessage
-	TaskID       string    `json:"task_id"`
-	Description  string    `json:"description"`
-	Usage        TaskUsage `json:"usage"`
-	UUID         string    `json:"uuid"`
-	SessionID    string    `json:"session_id"`
-	ToolUseID    *string   `json:"tool_use_id,omitempty"`
-	LastToolName *string   `json:"last_tool_name,omitempty"`
+	TaskID       string
+	Description  string
+	Usage        TaskUsage
+	UUID         string
+	SessionID    string
+	ToolUseID    *string
+	LastToolName *string
 }
 
 // TaskNotificationMessage is the typed form of a task_notification system
 // message, sent when a task completes, fails or is stopped. Not every finished
 // task sends one: a background task can report its end only as a
 // TaskUpdatedMessage with a terminal status (see IsTerminalTaskStatus).
-// The embedded SystemMessage keeps the subtype and the raw payload.
+// The embedded SystemMessage keeps the subtype and the raw payload, and
+// json.Marshal writes that raw payload. The parser always returns
+// *SystemMessage, so get this type with an AsTask* method, not a type switch.
 type TaskNotificationMessage struct {
 	SystemMessage
-	TaskID     string                 `json:"task_id"`
-	Status     TaskNotificationStatus `json:"status"`
-	OutputFile string                 `json:"output_file"`
-	Summary    string                 `json:"summary"`
-	UUID       string                 `json:"uuid"`
-	SessionID  string                 `json:"session_id"`
-	ToolUseID  *string                `json:"tool_use_id,omitempty"`
-	Usage      *TaskUsage             `json:"usage,omitempty"`
+	TaskID     string
+	Status     TaskNotificationStatus
+	OutputFile string
+	Summary    string
+	UUID       string
+	SessionID  string
+	ToolUseID  *string
+	Usage      *TaskUsage
 }
 
 // TaskUpdatedMessage is the typed form of a task_updated system message.
 // Patch holds the task fields that changed; Status is Patch["status"] when
 // that is a string. A task stopped with StopTask can report its end only
 // here, with status killed and no TaskNotificationMessage.
-// The embedded SystemMessage keeps the subtype and the raw payload.
+// The embedded SystemMessage keeps the subtype and the raw payload, and
+// json.Marshal writes that raw payload. The parser always returns
+// *SystemMessage, so get this type with an AsTask* method, not a type switch.
 type TaskUpdatedMessage struct {
 	SystemMessage
-	TaskID    string             `json:"task_id"`
-	Patch     map[string]any     `json:"patch"`
-	Status    *TaskUpdatedStatus `json:"-"`
-	SessionID *string            `json:"session_id,omitempty"`
-	UUID      *string            `json:"uuid,omitempty"`
+	TaskID    string
+	Patch     map[string]any
+	Status    *TaskUpdatedStatus
+	SessionID *string
+	UUID      *string
 }
 
 // AsTaskStarted returns the typed form of a task_started message. ok is false

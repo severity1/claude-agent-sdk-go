@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/severity1/claude-agent-sdk-go/internal/control"
 	"github.com/severity1/claude-agent-sdk-go/internal/subprocess"
 )
 
@@ -1212,6 +1213,132 @@ func TestClientDoneAndErrLifecycle(t *testing.T) {
 	}
 }
 
+// TestClientDoneAndErrDoNotBlockDuringDisconnect verifies that Done and Err
+// return at once while Disconnect waits for a slow transport Close.
+func TestClientDoneAndErrDoNotBlockDuringDisconnect(t *testing.T) {
+	ctx, cancel := setupClientTestContext(t, 10*time.Second)
+	defer cancel()
+
+	transport := &blockingCloseTransport{
+		processMockTransport: newProcessMockTransport(),
+		closing:              make(chan struct{}),
+		release:              make(chan struct{}),
+	}
+	client := setupClientForTest(t, transport)
+	connectClientSafely(ctx, t, client)
+
+	disconnected := make(chan error, 1)
+	go func() { disconnected <- client.Disconnect() }()
+	<-transport.closing
+
+	returned := make(chan struct{})
+	go func() {
+		_ = client.Done()
+		_ = client.Err()
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Error("Done() or Err() blocked while Disconnect ran")
+	}
+
+	close(transport.release)
+	if err := <-disconnected; err != nil {
+		t.Fatalf("Disconnect() = %v", err)
+	}
+}
+
+// TestClientNotConnectedErrors verifies that every call on a client that is
+// not connected returns a *ConnectionError that wraps ErrNotConnected.
+func TestClientNotConnectedErrors(t *testing.T) {
+	ctx, cancel := setupClientTestContext(t, 10*time.Second)
+	defer cancel()
+
+	calls := []struct {
+		name string
+		call func(Client) error
+	}{
+		{"Query", func(c Client) error { return c.Query(ctx, "hello") }},
+		{"QueryWithSession", func(c Client) error { return c.QueryWithSession(ctx, "hello", "s1") }},
+		{"QueryStream", func(c Client) error { return c.QueryStream(ctx, make(chan StreamMessage)) }},
+		{"Interrupt", func(c Client) error { return c.Interrupt(ctx) }},
+		{"SetModel", func(c Client) error { model := testModelSonnet; return c.SetModel(ctx, &model) }},
+		{"SetPermissionMode", func(c Client) error { return c.SetPermissionMode(ctx, PermissionModeAcceptEdits) }},
+		{"RewindFiles", func(c Client) error { return c.RewindFiles(ctx, "uuid-1") }},
+		{"GetMcpStatus", func(c Client) error { _, err := c.GetMcpStatus(ctx); return err }},
+		{"StopTask", func(c Client) error { return c.StopTask(ctx, "task-1") }},
+		{"GetServerInfo", func(c Client) error { _, err := c.GetServerInfo(ctx); return err }},
+		{"Err", func(c Client) error { return c.Err() }},
+	}
+
+	states := []struct {
+		name  string
+		setup func(t *testing.T, c Client)
+	}{
+		{"before_connect", func(*testing.T, Client) {}},
+		{"after_disconnect", func(t *testing.T, c Client) {
+			connectClientSafely(ctx, t, c)
+			disconnectClientSafely(t, c)
+		}},
+	}
+
+	for _, state := range states {
+		for _, test := range calls {
+			t.Run(state.name+"/"+test.name, func(t *testing.T) {
+				client := setupClientForTest(t, newClientMockTransport())
+				state.setup(t, client)
+
+				err := test.call(client)
+				if !errors.Is(err, ErrNotConnected) || !IsConnectionError(err) {
+					t.Fatalf("%s = %v, want a *ConnectionError wrapping ErrNotConnected", test.name, err)
+				}
+			})
+		}
+	}
+}
+
+// TestErrProtocolClosedIsExported verifies that callers can match the
+// control protocol's closed error with errors.Is.
+func TestErrProtocolClosedIsExported(t *testing.T) {
+	err := fmt.Errorf("interrupt: %w", control.ErrProtocolClosed)
+	if !errors.Is(err, ErrProtocolClosed) {
+		t.Fatalf("errors.Is(%v, ErrProtocolClosed) = false", err)
+	}
+}
+
+// TestStreamReaderSharedPendingError verifies that when two iterators share
+// one pending error, one gets it and the other keeps reading: neither gets
+// (nil, nil).
+func TestStreamReaderSharedPendingError(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		stream := newStreamReader(make(chan Message), make(chan error))
+		exitErr := errors.New("exit")
+		stream.setPending(exitErr)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		results := make(chan error, 2)
+		for g := 0; g < 2; g++ {
+			go func() {
+				msg, err := stream.next(ctx, nil)
+				if msg == nil && err == nil {
+					results <- errors.New("next returned (nil, nil)")
+					return
+				}
+				results <- err
+			}()
+		}
+		first, second := <-results, <-results
+		cancel()
+
+		gotExit := errors.Is(first, exitErr) != errors.Is(second, exitErr)
+		gotCtx := errors.Is(first, context.DeadlineExceeded) != errors.Is(second, context.DeadlineExceeded)
+		if !gotExit || !gotCtx {
+			t.Fatalf("iteration %d: results %v and %v, want the exit error once and a deadline error once", i, first, second)
+		}
+	}
+}
+
 // TestSubprocessTransportReportsProcessExit guards the optional interface
 // that Done and Err type-assert: if the subprocess transport stopped
 // satisfying it, Done would silently close only on Disconnect.
@@ -1710,6 +1837,20 @@ func (p *processMockTransport) Err() error {
 	p.procMu.Lock()
 	defer p.procMu.Unlock()
 	return p.exitErr
+}
+
+// blockingCloseTransport is a processMockTransport whose Close signals
+// closing and then waits for release.
+type blockingCloseTransport struct {
+	*processMockTransport
+	closing chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingCloseTransport) Close() error {
+	close(b.closing)
+	<-b.release
+	return b.processMockTransport.Close()
 }
 
 // serverInfoTransport is a clientMockTransport that keeps an initialize

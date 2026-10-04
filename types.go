@@ -40,6 +40,15 @@ type ToolUseBlock = shared.ToolUseBlock
 // ToolResultBlock represents a tool result content block.
 type ToolResultBlock = shared.ToolResultBlock
 
+// ServerToolUseBlock is a call to a tool that the API runs on the server side.
+type ServerToolUseBlock = shared.ServerToolUseBlock
+
+// ServerToolResultBlock is the result of a server-side tool call.
+type ServerToolResultBlock = shared.ServerToolResultBlock
+
+// ServerToolName names a tool that the API runs on the server side.
+type ServerToolName = shared.ServerToolName
+
 // StreamMessage represents a message in the streaming protocol.
 type StreamMessage = shared.StreamMessage
 
@@ -117,6 +126,18 @@ const (
 	MessageTypeConversationReset = shared.MessageTypeConversationReset
 )
 
+// Re-export server tool names.
+const (
+	ServerToolNameAdvisor                 = shared.ServerToolNameAdvisor
+	ServerToolNameWebSearch               = shared.ServerToolNameWebSearch
+	ServerToolNameWebFetch                = shared.ServerToolNameWebFetch
+	ServerToolNameCodeExecution           = shared.ServerToolNameCodeExecution
+	ServerToolNameBashCodeExecution       = shared.ServerToolNameBashCodeExecution
+	ServerToolNameTextEditorCodeExecution = shared.ServerToolNameTextEditorCodeExecution
+	ServerToolNameToolSearchToolRegex     = shared.ServerToolNameToolSearchToolRegex
+	ServerToolNameToolSearchToolBM25      = shared.ServerToolNameToolSearchToolBM25
+)
+
 // Re-export task lifecycle system message subtypes and statuses.
 const (
 	SystemSubtypeTaskStarted      = shared.SystemSubtypeTaskStarted
@@ -147,6 +168,9 @@ const (
 	ContentBlockTypeThinking   = shared.ContentBlockTypeThinking
 	ContentBlockTypeToolUse    = shared.ContentBlockTypeToolUse
 	ContentBlockTypeToolResult = shared.ContentBlockTypeToolResult
+
+	ContentBlockTypeServerToolUse     = shared.ContentBlockTypeServerToolUse
+	ContentBlockTypeAdvisorToolResult = shared.ContentBlockTypeAdvisorToolResult
 )
 
 // Re-export stream event type constants for Event["type"] discrimination.

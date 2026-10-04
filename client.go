@@ -2,7 +2,6 @@ package claudecode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -75,8 +74,6 @@ type processWatcher interface {
 	Err() error
 }
 
-var errClientNotConnected = errors.New("client not connected")
-
 // closedDone is the Done channel of a client with no connection.
 var closedDone = func() chan struct{} {
 	ch := make(chan struct{})
@@ -96,6 +93,16 @@ type ClientImpl struct {
 	streamErrChan   chan error    // writable; receives errors from QueryStream goroutine
 	// disconnected closes on Disconnect. Done returns it when the transport
 	// cannot report its process.
+	disconnected chan struct{}
+	// watch is guarded by watchMu, not mu, so Done and Err never wait for
+	// Disconnect. It is nil while the client is not connected.
+	watchMu sync.Mutex
+	watch   *connectionWatch
+}
+
+// connectionWatch is what Done and Err read for one connection.
+type connectionWatch struct {
+	watcher      processWatcher // nil when the transport cannot report its process
 	disconnected chan struct{}
 }
 
@@ -368,6 +375,14 @@ func (c *ClientImpl) Connect(ctx context.Context, _ ...StreamMessage) error {
 	c.streamErrChan = make(chan error, 1)
 	c.disconnected = make(chan struct{})
 
+	watch := &connectionWatch{disconnected: c.disconnected}
+	if watcher, ok := c.transport.(processWatcher); ok {
+		watch.watcher = watcher
+	}
+	c.watchMu.Lock()
+	c.watch = watch
+	c.watchMu.Unlock()
+
 	c.connected = true
 	return nil
 }
@@ -385,6 +400,9 @@ func (c *ClientImpl) Disconnect() error {
 	if c.connected {
 		close(c.disconnected)
 	}
+	c.watchMu.Lock()
+	c.watch = nil
+	c.watchMu.Unlock()
 	c.connected = false
 	c.transport = nil
 	c.msgChan = nil
@@ -646,31 +664,33 @@ func (c *ClientImpl) GetMcpStatus(ctx context.Context) (*McpStatusResponse, erro
 
 // Done returns a channel that is closed when the connected CLI process exits.
 func (c *ClientImpl) Done() <-chan struct{} {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if !c.connected || c.transport == nil {
+	watch := c.currentWatch()
+	if watch == nil {
 		return closedDone
 	}
-	if watcher, ok := c.transport.(processWatcher); ok {
-		return watcher.Done()
+	if watch.watcher != nil {
+		return watch.watcher.Done()
 	}
-	return c.disconnected
+	return watch.disconnected
 }
 
 // Err returns nil while the connected CLI process runs, and why it stopped
 // once Done is closed.
 func (c *ClientImpl) Err() error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if !c.connected || c.transport == nil {
-		return errClientNotConnected
+	watch := c.currentWatch()
+	if watch == nil {
+		return notConnectedError()
 	}
-	if watcher, ok := c.transport.(processWatcher); ok {
-		return watcher.Err()
+	if watch.watcher != nil {
+		return watch.watcher.Err()
 	}
 	return nil
+}
+
+func (c *ClientImpl) currentWatch() *connectionWatch {
+	c.watchMu.Lock()
+	defer c.watchMu.Unlock()
+	return c.watch
 }
 
 // liveTransport returns the transport of a connected client whose CLI
@@ -684,7 +704,7 @@ func (c *ClientImpl) liveTransport() (Transport, error) {
 // liveTransportLocked is liveTransport for callers that hold c.mu.
 func (c *ClientImpl) liveTransportLocked() (Transport, error) {
 	if !c.connected || c.transport == nil {
-		return nil, errClientNotConnected
+		return nil, notConnectedError()
 	}
 	if watcher, ok := c.transport.(processWatcher); ok {
 		if err := watcher.Err(); err != nil {
@@ -832,7 +852,7 @@ func (c *ClientImpl) GetServerInfo(_ context.Context) (map[string]interface{}, e
 	defer c.mu.RUnlock()
 
 	if !c.connected || c.transport == nil {
-		return nil, errClientNotConnected
+		return nil, notConnectedError()
 	}
 
 	if source, ok := c.transport.(serverInfoSource); ok {

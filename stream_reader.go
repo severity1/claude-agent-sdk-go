@@ -29,8 +29,8 @@ func newStreamReader(msgChan <-chan Message, errChan <-chan error) *streamReader
 func (s *streamReader) next(ctx context.Context, aux <-chan error) (Message, error) {
 	errChan := s.errChan
 	for {
-		if s.hasPending() {
-			return s.drainToPending()
+		if msg, err := s.drainToPending(); msg != nil || err != nil {
+			return msg, err
 		}
 		select {
 		case msg, ok := <-s.msgChan:
@@ -58,7 +58,8 @@ func (s *streamReader) next(ctx context.Context, aux <-chan error) (Message, err
 
 // drainToPending returns a message that is still buffered, or else the
 // pending error. The error was sent after those messages, so a message that
-// is not buffered now is never coming before it.
+// is not buffered now is never coming before it. It returns (nil, nil) when
+// neither is there, for example when another iterator took the error first.
 func (s *streamReader) drainToPending() (Message, error) {
 	select {
 	case msg, ok := <-s.msgChan:
@@ -84,12 +85,6 @@ func (s *streamReader) endOfStream() error {
 	default:
 	}
 	return ErrNoMoreMessages
-}
-
-func (s *streamReader) hasPending() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.pending != nil
 }
 
 func (s *streamReader) setPending(err error) {

@@ -158,8 +158,12 @@ func main() {
             select {
             case message := <-msgChan:
                 if message == nil {
-                    // The CLI process exited; Err says why.
-                    return fmt.Errorf("stream ended: %w", client.Err())
+                    // The stream ended. Err says why, or is nil when the
+                    // process exit is not known yet.
+                    if err := client.Err(); err != nil {
+                        return fmt.Errorf("stream ended: %w", err)
+                    }
+                    return nil
                 }
 
                 switch msg := message.(type) {

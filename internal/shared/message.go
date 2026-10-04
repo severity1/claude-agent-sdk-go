@@ -32,6 +32,25 @@ const (
 	ContentBlockTypeThinking   = "thinking"
 	ContentBlockTypeToolUse    = "tool_use"
 	ContentBlockTypeToolResult = "tool_result"
+
+	// Blocks for tools that the API runs on the server side.
+	ContentBlockTypeServerToolUse     = "server_tool_use"
+	ContentBlockTypeAdvisorToolResult = "advisor_tool_result"
+)
+
+// ServerToolName names a tool that the API runs on the server side.
+type ServerToolName string
+
+// ServerToolName values. The CLI can send other names; they pass through.
+const (
+	ServerToolNameAdvisor                 ServerToolName = "advisor"
+	ServerToolNameWebSearch               ServerToolName = "web_search"
+	ServerToolNameWebFetch                ServerToolName = "web_fetch"
+	ServerToolNameCodeExecution           ServerToolName = "code_execution"
+	ServerToolNameBashCodeExecution       ServerToolName = "bash_code_execution"
+	ServerToolNameTextEditorCodeExecution ServerToolName = "text_editor_code_execution"
+	ServerToolNameToolSearchToolRegex     ServerToolName = "tool_search_tool_regex"
+	ServerToolNameToolSearchToolBM25      ServerToolName = "tool_search_tool_bm25"
 )
 
 // AssistantMessageError represents error types in assistant messages.
@@ -277,6 +296,33 @@ type ToolResultBlock struct {
 // BlockType returns the content block type for ToolResultBlock.
 func (b *ToolResultBlock) BlockType() string {
 	return ContentBlockTypeToolResult
+}
+
+// ServerToolUseBlock is a call to a tool that the API runs on the server
+// side, such as advisor or web_search. The caller sends no result for it.
+type ServerToolUseBlock struct {
+	MessageType string         `json:"type"`
+	ID          string         `json:"id"`
+	Name        ServerToolName `json:"name"`
+	Input       map[string]any `json:"input"`
+}
+
+// BlockType returns the content block type for ServerToolUseBlock.
+func (b *ServerToolUseBlock) BlockType() string {
+	return ContentBlockTypeServerToolUse
+}
+
+// ServerToolResultBlock is the result of a server-side tool call. Content is
+// the raw object from the API; its "type" key names the result schema.
+type ServerToolResultBlock struct {
+	MessageType string         `json:"type"`
+	ToolUseID   string         `json:"tool_use_id"`
+	Content     map[string]any `json:"content"`
+}
+
+// BlockType returns the content block type for ServerToolResultBlock.
+func (b *ServerToolResultBlock) BlockType() string {
+	return ContentBlockTypeAdvisorToolResult
 }
 
 // RawControlMessage wraps raw control protocol messages for passthrough to the control handler.
