@@ -587,11 +587,6 @@ func TestParseErrors(t *testing.T) {
 			expectError: "missing or invalid type field",
 		},
 		{
-			name:        "unknown_message_type",
-			data:        map[string]any{"type": "unknown_type", "content": "test"},
-			expectError: "unknown message type: unknown_type",
-		},
-		{
 			name:        "user_message_missing_message_field",
 			data:        map[string]any{"type": "user"},
 			expectError: "user message missing message field",
@@ -1005,12 +1000,12 @@ func TestParseMessages(t *testing.T) {
 	// Test error handling
 	errorLines := []string{
 		`{"type": "user", "message": {"content": "Valid"}}`,
-		`{"type": "invalid"}`, // This should cause an error
+		`{"type": "user"}`, // missing message field
 	}
 
 	_, err = ParseMessages(errorLines)
 	if err == nil {
-		t.Error("Expected error for invalid message type")
+		t.Fatal("Expected error for user message without message field")
 	}
 	if !strings.Contains(err.Error(), "error parsing line 1") {
 		t.Errorf("Expected line number in error, got: %v", err)
@@ -1078,7 +1073,7 @@ func TestParseErrorConditions(t *testing.T) {
 				"type": "assistant",
 				"message": map[string]any{
 					"content": []any{
-						map[string]any{"type": "unknown_block"},
+						map[string]any{"type": "text"},
 					},
 					"model": "claude-3",
 				},
@@ -1275,11 +1270,6 @@ func TestContentBlockErrorConditions(t *testing.T) {
 			expectError: "content block missing type field",
 		},
 		{
-			name:        "unknown_block_type",
-			blockData:   map[string]any{"type": "unknown_type"},
-			expectError: "unknown content block type: unknown_type",
-		},
-		{
 			name:        "text_block_missing_text",
 			blockData:   map[string]any{"type": "text"},
 			expectError: "text block missing text field",
@@ -1388,7 +1378,7 @@ func TestProcessLineEdgeCases(t *testing.T) {
 	parser := setupParserTest(t)
 
 	// Test line with content block parse error
-	invalidBlockLine := `{"type": "user", "message": {"content": [{"type": "unknown_block"}]}}`
+	invalidBlockLine := `{"type": "user", "message": {"content": [{"type": "text"}]}}`
 	messages, err := parser.ProcessLine(invalidBlockLine)
 	if err == nil {
 		t.Error("Expected error for invalid content block")
@@ -1398,7 +1388,7 @@ func TestProcessLineEdgeCases(t *testing.T) {
 	}
 
 	// Test multiple lines with one having an error
-	mixedLine := `{"type": "system", "subtype": "ok"}` + "\n" + `{"type": "invalid"}`
+	mixedLine := `{"type": "system", "subtype": "ok"}` + "\n" + `{"type": "user"}`
 	messages2, err2 := parser.ProcessLine(mixedLine)
 	if err2 == nil {
 		t.Error("Expected error for second invalid message")
@@ -1409,7 +1399,123 @@ func TestProcessLineEdgeCases(t *testing.T) {
 	}
 }
 
+// TestParseMessageSkipsUnknownType tests that an unknown message type gives no message and no error.
+func TestParseMessageSkipsUnknownType(t *testing.T) {
+	parser := setupParserTest(t)
+
+	msg, err := parser.ParseMessage(map[string]any{"type": "future_type", "content": "test"})
+	assertNoParseError(t, err)
+	assertNoMessage(t, msg)
+}
+
+// TestProcessLineSkipsUnknownType tests that an unknown line does not stop the known lines around it.
+func TestProcessLineSkipsUnknownType(t *testing.T) {
+	parser := setupParserTest(t)
+
+	input := validSystemStatusJSON + "\n" +
+		`{"type": "future_type", "payload": {"a": 1}}` + "\n" +
+		`{"type": "user", "message": {"content": "hello"}}`
+	messages, err := parser.ProcessLine(input)
+	assertNoParseError(t, err)
+	assertMessageCount(t, messages, 2)
+	assertMessageType(t, messages[0], shared.MessageTypeSystem)
+	assertMessageType(t, messages[1], shared.MessageTypeUser)
+}
+
+// TestParseSkipsUnknownContentBlock tests that an unknown block is dropped and the known blocks stay.
+func TestParseSkipsUnknownContentBlock(t *testing.T) {
+	content := []any{
+		map[string]any{"type": "text", "text": "before"},
+		map[string]any{"type": "future_block", "data": "x"},
+		map[string]any{"type": "text", "text": "after"},
+	}
+
+	t.Run("assistant", func(t *testing.T) {
+		parser := setupParserTest(t)
+		msg, err := parser.ParseMessage(map[string]any{
+			"type":    "assistant",
+			"message": map[string]any{"model": "claude-test", "content": content},
+		})
+		assertParseSuccess(t, err, msg)
+		assistant, ok := msg.(*shared.AssistantMessage)
+		if !ok {
+			t.Fatalf("Expected *shared.AssistantMessage, got %T", msg)
+			return
+		}
+		assertTextBlocks(t, assistant.Content, "before", "after")
+	})
+
+	t.Run("user", func(t *testing.T) {
+		parser := setupParserTest(t)
+		msg, err := parser.ParseMessage(map[string]any{
+			"type":    "user",
+			"message": map[string]any{"content": content},
+		})
+		assertParseSuccess(t, err, msg)
+		user, ok := msg.(*shared.UserMessage)
+		if !ok {
+			t.Fatalf("Expected *shared.UserMessage, got %T", msg)
+			return
+		}
+		blocks, ok := user.Content.([]shared.ContentBlock)
+		if !ok {
+			t.Fatalf("Expected []shared.ContentBlock, got %T", user.Content)
+			return
+		}
+		assertTextBlocks(t, blocks, "before", "after")
+	})
+}
+
+// TestParseConversationResetMessage tests the conversation_reset message and its required fields.
+func TestParseConversationResetMessage(t *testing.T) {
+	full := map[string]any{
+		"type":                "conversation_reset",
+		"new_conversation_id": "conv-2",
+		"uuid":                "uuid-1",
+		"session_id":          "session-1",
+	}
+
+	parser := setupParserTest(t)
+	msg, err := parser.ParseMessage(full)
+	assertParseSuccess(t, err, msg)
+	reset, ok := msg.(*shared.ConversationResetMessage)
+	if !ok {
+		t.Fatalf("Expected *shared.ConversationResetMessage, got %T", msg)
+		return
+	}
+	assertMessageType(t, reset, shared.MessageTypeConversationReset)
+	if reset.NewConversationID != "conv-2" || reset.UUID != "uuid-1" || reset.SessionID != "session-1" {
+		t.Errorf("Unexpected fields: %+v", reset)
+	}
+
+	for _, field := range []string{"new_conversation_id", "uuid", "session_id"} {
+		t.Run("missing_"+field, func(t *testing.T) {
+			data := make(map[string]any, len(full))
+			for k, v := range full {
+				if k != field {
+					data[k] = v
+				}
+			}
+			_, err := setupParserTest(t).ParseMessage(data)
+			assertParseError(t, err, "conversation_reset message missing "+field+" field")
+		})
+	}
+}
+
 // Mock and Helper Functions
+
+func assertTextBlocks(t *testing.T, blocks []shared.ContentBlock, want ...string) {
+	t.Helper()
+	if len(blocks) != len(want) {
+		t.Fatalf("Expected %d blocks, got %d: %#v", len(want), len(blocks), blocks)
+	}
+	for i, text := range want {
+		block, ok := blocks[i].(*shared.TextBlock)
+		if !ok || block.Text != text {
+			t.Errorf("Block %d: expected text %q, got %#v", i, text, blocks[i])
+		}
+	}
+}
 
 // setupParserTest creates a new parser for testing
 func setupParserTest(t *testing.T) *Parser {

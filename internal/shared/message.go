@@ -21,6 +21,9 @@ const (
 	// Session heartbeat carrying rate-limit window state. Emitted on
 	// essentially every CLI session — even when nothing is constrained.
 	MessageTypeRateLimitEvent = "rate_limit_event"
+
+	// Conversation replaced mid-session, for example after /clear.
+	MessageTypeConversationReset = "conversation_reset"
 )
 
 // Content block type constants
@@ -324,6 +327,25 @@ type RateLimitEventMessage struct {
 // Type returns the message type for RateLimitEventMessage.
 func (m *RateLimitEventMessage) Type() string {
 	return MessageTypeRateLimitEvent
+}
+
+// ConversationResetMessage reports that the session's conversation was
+// replaced without ending the connection, for example after /clear. Later
+// ResultMessage totals such as TotalCostUSD start again from zero, and later
+// messages carry a new session ID.
+type ConversationResetMessage struct {
+	MessageType string `json:"type"`
+	// NewConversationID identifies the new conversation. It is not the
+	// session ID of later messages.
+	NewConversationID string `json:"new_conversation_id"`
+	UUID              string `json:"uuid"`
+	// SessionID is the ID of the session that was reset.
+	SessionID string `json:"session_id"`
+}
+
+// Type returns the message type for ConversationResetMessage.
+func (m *ConversationResetMessage) Type() string {
+	return MessageTypeConversationReset
 }
 
 // IsAllowed returns true when the rate-limit window is healthy — i.e. the

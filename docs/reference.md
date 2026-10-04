@@ -1525,6 +1525,23 @@ type RateLimitInfo struct {
 Methods:
 - `IsAllowed() bool` - Check if `Status` is `RateLimitStatusAllowed`
 
+### `ConversationResetMessage`
+
+The CLI replaced the conversation without ending the connection, for example after `/clear`. Later `ResultMessage` totals (for example `TotalCostUSD`) start again from zero. Later messages carry a new session ID.
+
+```go
+type ConversationResetMessage struct {
+    MessageType       string
+    NewConversationID string // not the session ID of later messages
+    UUID              string
+    SessionID         string // the session that was reset
+}
+```
+
+### Unknown Message Types
+
+The parser skips a message with an unknown `type`, and drops a content block with an unknown `type`. A newer CLI thus does not stop the stream or remove a message. A known type with a missing required field still gives a parse error.
+
 ### `RawControlMessage`
 
 Raw control protocol message.
@@ -1540,14 +1557,15 @@ type RawControlMessage struct {
 
 ```go
 const (
-    MessageTypeUser            = "user"
-    MessageTypeAssistant       = "assistant"
-    MessageTypeSystem          = "system"
-    MessageTypeResult          = "result"
-    MessageTypeControlRequest  = "control_request"
-    MessageTypeControlResponse = "control_response"
-    MessageTypeStreamEvent     = "stream_event"
-    MessageTypeRateLimitEvent  = "rate_limit_event"
+    MessageTypeUser              = "user"
+    MessageTypeAssistant         = "assistant"
+    MessageTypeSystem            = "system"
+    MessageTypeResult            = "result"
+    MessageTypeControlRequest    = "control_request"
+    MessageTypeControlResponse   = "control_response"
+    MessageTypeStreamEvent       = "stream_event"
+    MessageTypeRateLimitEvent    = "rate_limit_event"
+    MessageTypeConversationReset = "conversation_reset"
 )
 ```
 

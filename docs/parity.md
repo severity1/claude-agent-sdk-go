@@ -23,7 +23,7 @@ Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (d
 |:---------|:-----------|:-------|:------|
 | Client methods | 15 | 16 | 12 Python methods have a Go equivalent; 3 are pending; Go adds `QueryStream`, `GetStreamIssues`, `GetStreamStats` |
 | Hook events | 10 | 10 | All 10 events ported |
-| Message types (top level) | 7 | 6 (+`RawControlMessage`) | `ConversationResetMessage` pending; Python also has 6 typed `SystemMessage` subclasses: Go has the 4 task ones as typed views of `SystemMessage`, 2 are pending |
+| Message types (top level) | 7 | 7 (+`RawControlMessage`) | All 7 ported; Python also has 6 typed `SystemMessage` subclasses: Go has the 4 task ones as typed views of `SystemMessage`, 2 are pending |
 | Content block types | 6 | 4 | `ServerToolUseBlock` and `ServerToolResultBlock` pending |
 | Error types | 7 | 6 (+`BaseError`) | `ResultError` pending |
 | Permission modes | 6 | 4 | `dontAsk` and `auto` pending |
@@ -196,7 +196,7 @@ These contributor PRs merged on Oct 4, 2026, after v0.8.0. The table maps each o
 | `ResultMessage` | `ResultMessage` struct | PARITY (some newer fields pending, for example `stop_reason`, `api_error_status`, `terminal_reason`, `model_usage`) |
 | `StreamEvent` | `StreamEvent` struct | PARITY |
 | `RateLimitEvent` | `RateLimitEventMessage` struct | PARTIAL (README #15) |
-| `ConversationResetMessage` | - | PENDING (post-snapshot P37) |
+| `ConversationResetMessage` | `ConversationResetMessage` struct | PARITY |
 | `TaskStartedMessage`, `TaskProgressMessage`, `TaskNotificationMessage` | `TaskStartedMessage`, `TaskProgressMessage`, `TaskNotificationMessage` structs via `SystemMessage.AsTaskStarted()` etc. | PARITY (delivered as `*SystemMessage`; see README #11) |
 | `TaskUpdatedMessage` | `TaskUpdatedMessage` struct via `SystemMessage.AsTaskUpdated()` | PARITY (delivered as `*SystemMessage`) |
 | `TaskUsage`, `TaskNotificationStatus`, `TaskUpdatedStatus` | `TaskUsage`, `TaskNotificationStatus`, `TaskUpdatedStatus` | PARITY |
@@ -215,6 +215,8 @@ These contributor PRs merged on Oct 4, 2026, after v0.8.0. The table maps each o
 | `"result"` | `MessageTypeResult` | PARITY |
 | `"stream_event"` | `MessageTypeStreamEvent` | PARITY |
 | `"rate_limit_event"` | `MessageTypeRateLimitEvent` | PARITY |
+| `"conversation_reset"` | `MessageTypeConversationReset` | PARITY |
+| unknown `type` (skipped, unknown blocks dropped) | same: `ParseMessage` returns a nil message and nil error | PARITY (README #8) |
 | - | `MessageTypeControlRequest` | GO EXTRA |
 | - | `MessageTypeControlResponse` | GO EXTRA |
 

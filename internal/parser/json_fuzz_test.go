@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 )
 
 // FuzzParser_ProcessLine fuzzes the ProcessLine method with arbitrary input.
@@ -98,9 +100,10 @@ func FuzzParser_ParseMessage(f *testing.F) {
 		parser := New()
 		msg, err := parser.ParseMessage(data)
 
-		// Either parse successfully or return error (no panics)
-		if err == nil && msg == nil {
-			t.Errorf("ParseMessage returned nil message without error")
+		// Either parse successfully or return error (no panics); only an
+		// unknown type may give neither.
+		if err == nil && msg == nil && !isUnknownMessageType(data) {
+			t.Errorf("ParseMessage returned nil message without error for %v", data["type"])
 		}
 	})
 }
@@ -348,4 +351,18 @@ func FuzzParser_StreamingChunks(f *testing.F) {
 		// No state should leak - each message independent
 		// This is ensured by the parser's mutex and buffer reset logic
 	})
+}
+
+func isUnknownMessageType(data map[string]any) bool {
+	msgType, ok := data["type"].(string)
+	if !ok {
+		return false
+	}
+	switch msgType {
+	case shared.MessageTypeUser, shared.MessageTypeAssistant, shared.MessageTypeSystem,
+		shared.MessageTypeResult, shared.MessageTypeControlRequest, shared.MessageTypeControlResponse,
+		shared.MessageTypeStreamEvent, shared.MessageTypeRateLimitEvent, shared.MessageTypeConversationReset:
+		return false
+	}
+	return true
 }

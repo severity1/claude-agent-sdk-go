@@ -71,7 +71,8 @@ func (p *Parser) ProcessLine(line string) ([]shared.Message, error) {
 }
 
 // ParseMessage parses a raw JSON object into the appropriate Message type.
-// Implements type discrimination based on the "type" field.
+// Implements type discrimination based on the "type" field. An unknown type
+// returns a nil Message and a nil error, so a newer CLI does not break the stream.
 func (p *Parser) ParseMessage(data map[string]any) (shared.Message, error) {
 	msgType, ok := data["type"].(string)
 	if !ok {
@@ -97,11 +98,10 @@ func (p *Parser) ParseMessage(data map[string]any) (shared.Message, error) {
 		return p.parseStreamEventMessage(data)
 	case shared.MessageTypeRateLimitEvent:
 		return p.parseRateLimitEventMessage(data)
+	case shared.MessageTypeConversationReset:
+		return parseConversationResetMessage(data)
 	default:
-		return nil, shared.NewMessageParseError(
-			fmt.Sprintf("unknown message type: %s", msgType),
-			data,
-		)
+		return nil, nil
 	}
 }
 
@@ -208,13 +208,9 @@ func (p *Parser) parseUserMessage(data map[string]any) (*shared.UserMessage, err
 		}, nil
 	case []any:
 		// Array of content blocks
-		blocks := make([]shared.ContentBlock, len(c))
-		for i, blockData := range c {
-			block, err := p.parseContentBlock(blockData)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse content block %d: %w", i, err)
-			}
-			blocks[i] = block
+		blocks, err := p.parseContentBlocks(c)
+		if err != nil {
+			return nil, err
 		}
 		return &shared.UserMessage{
 			Content:         blocks,
@@ -244,13 +240,9 @@ func (p *Parser) parseAssistantMessage(data map[string]any) (*shared.AssistantMe
 		return nil, shared.NewMessageParseError("assistant message missing model field", data)
 	}
 
-	blocks := make([]shared.ContentBlock, len(contentArray))
-	for i, blockData := range contentArray {
-		block, err := p.parseContentBlock(blockData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse content block %d: %w", i, err)
-		}
-		blocks[i] = block
+	blocks, err := p.parseContentBlocks(contentArray)
+	if err != nil {
+		return nil, err
 	}
 
 	// Parse optional error field from top-level data, not the nested message object.
@@ -377,7 +369,23 @@ func (p *Parser) parseResultMessage(data map[string]any) (*shared.ResultMessage,
 	return result, nil
 }
 
-// parseContentBlock parses a content block based on its type field.
+// parseContentBlocks parses content blocks and drops blocks of an unknown type.
+func (p *Parser) parseContentBlocks(raw []any) ([]shared.ContentBlock, error) {
+	blocks := make([]shared.ContentBlock, 0, len(raw))
+	for i, blockData := range raw {
+		block, err := p.parseContentBlock(blockData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse content block %d: %w", i, err)
+		}
+		if block != nil {
+			blocks = append(blocks, block)
+		}
+	}
+	return blocks, nil
+}
+
+// parseContentBlock parses a content block based on its type field. An
+// unknown type returns a nil block and a nil error.
 func (p *Parser) parseContentBlock(blockData any) (shared.ContentBlock, error) {
 	data, ok := blockData.(map[string]any)
 	if !ok {
@@ -399,10 +407,7 @@ func (p *Parser) parseContentBlock(blockData any) (shared.ContentBlock, error) {
 	case shared.ContentBlockTypeToolResult:
 		return p.parseToolResultBlock(data)
 	default:
-		return nil, shared.NewMessageParseError(
-			fmt.Sprintf("unknown content block type: %s", blockType),
-			data,
-		)
+		return nil, nil
 	}
 }
 
@@ -470,6 +475,25 @@ func (p *Parser) parseToolResultBlock(data map[string]any) (shared.ContentBlock,
 // data. Tolerant on optional fields: only the rate_limit_info object is
 // required; uuid / session_id are best-effort copies because the CLI does
 // not always include them depending on session state.
+func parseConversationResetMessage(data map[string]any) (*shared.ConversationResetMessage, error) {
+	fields := [3]string{"new_conversation_id", "uuid", "session_id"}
+	var values [3]string
+	for i, field := range fields {
+		value, ok := data[field].(string)
+		if !ok {
+			return nil, shared.NewMessageParseError(
+				fmt.Sprintf("conversation_reset message missing %s field", field), data)
+		}
+		values[i] = value
+	}
+	return &shared.ConversationResetMessage{
+		MessageType:       shared.MessageTypeConversationReset,
+		NewConversationID: values[0],
+		UUID:              values[1],
+		SessionID:         values[2],
+	}, nil
+}
+
 func (p *Parser) parseRateLimitEventMessage(data map[string]any) (*shared.RateLimitEventMessage, error) {
 	infoRaw, ok := data["rate_limit_info"].(map[string]any)
 	if !ok {

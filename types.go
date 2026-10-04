@@ -51,6 +51,10 @@ type RateLimitEventMessage = shared.RateLimitEventMessage
 // RateLimitInfo is the window state carried by RateLimitEventMessage.
 type RateLimitInfo = shared.RateLimitInfo
 
+// ConversationResetMessage reports that the session's conversation was
+// replaced without ending the connection, for example after /clear.
+type ConversationResetMessage = shared.ConversationResetMessage
+
 // TaskStartedMessage is the typed form of a task_started system message,
 // returned by SystemMessage.AsTaskStarted. Its TaskID is the ID StopTask takes.
 type TaskStartedMessage = shared.TaskStartedMessage
@@ -108,6 +112,9 @@ const (
 
 	// Session heartbeat carrying rate-limit window state.
 	MessageTypeRateLimitEvent = shared.MessageTypeRateLimitEvent
+
+	// Conversation replaced mid-session.
+	MessageTypeConversationReset = shared.MessageTypeConversationReset
 )
 
 // Re-export task lifecycle system message subtypes and statuses.
