@@ -17,7 +17,7 @@ Parity is tracked one Python PR at a time:
 
 Each row in those files has a Go status (`done`, `partial`, `pending`, or `n/a`). This document gives the overview. The tracker rows are the source of truth.
 
-Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK v0.8.0 (6c9d76f, Oct 4, 2026).
+Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (de83b7d, Oct 4, 2026).
 
 | Category | Python SDK | Go SDK | Notes |
 |:---------|:-----------|:-------|:------|
@@ -31,9 +31,9 @@ Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK v0.8.0 
 | Sandbox config | 3 types | 3 types | 4 `SandboxNetworkConfig` fields pending |
 
 
-### Open Go PRs (Oct 4, 2026)
+### Contributor Go PRs (merged Oct 4, 2026)
 
-These contributor PRs are open and not merged. The tracker rows keep their status until a PR merges.
+These contributor PRs merged on Oct 4, 2026, after v0.8.0. The table maps each one to its Python reference and tracker row.
 
 | Go PR | Python reference | Tracker | Change |
 |:------|:-----------------|:--------|:-------|
@@ -83,7 +83,7 @@ These contributor PRs are open and not merged. The tracker rows keep their statu
 | `__init__(options)` | `NewClient(opts...)` | PARITY (functional options) |
 | `connect(prompt)` | `Connect(ctx, prompt...)` | PARITY |
 | `query(prompt, session_id)` | `Query(ctx, prompt)` / `QueryWithSession(ctx, prompt, sessionID)` | PARITY (split into two methods) |
-| `receive_messages()` | `ReceiveMessages(ctx)` | PARITY (returns channel) |
+| `receive_messages()` | `ReceiveMessages(ctx)` | PARITY (returns channel; the exit reason comes from `Done()` and `Err()`) |
 | `receive_response()` | `ReceiveResponse(ctx)` | PARITY (returns MessageIterator) |
 | `interrupt()` | `Interrupt(ctx)` | PARITY |
 | `set_permission_mode(mode)` | `SetPermissionMode(ctx, mode)` | PARITY |
@@ -105,7 +105,7 @@ These contributor PRs are open and not merged. The tracker rows keep their statu
 | `QueryStream(ctx, messages)` | Send messages from a channel |
 | `GetStreamIssues()` | Get validation issues from stream |
 | `GetStreamStats()` | Get stream statistics |
-| `Done()` / `Err()` | Report when the CLI process exits and why. Python's `receive_messages()` raises the `ProcessError`; a Go channel cannot carry it, so these follow `context.Context` |
+| `Done()` / `Err()` | Report when the CLI process exits and why. Python's `receive_messages()` raises the `ProcessError`; a Go channel cannot carry it, so these follow `context.Context`. A clean exit gives a `*ConnectionError`; Python's stream just ends |
 
 ---
 
