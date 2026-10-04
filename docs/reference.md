@@ -1519,6 +1519,7 @@ type RateLimitInfo struct {
     OverageStatus   string
     OverageResetsAt int64
     IsUsingOverage  bool
+    Raw             map[string]any // the whole rate_limit_info object
 }
 ```
 

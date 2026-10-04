@@ -349,12 +349,13 @@ const (
 // regardless of whether the user is actually constrained — check Status to
 // decide if action is needed.
 type RateLimitInfo struct {
-	Status          string `json:"status"`
-	ResetsAt        int64  `json:"resetsAt"`
-	RateLimitType   string `json:"rateLimitType"`
-	OverageStatus   string `json:"overageStatus,omitempty"`
-	OverageResetsAt int64  `json:"overageResetsAt,omitempty"`
-	IsUsingOverage  bool   `json:"isUsingOverage,omitempty"`
+	Status          string         `json:"status"`
+	ResetsAt        int64          `json:"resetsAt"`
+	RateLimitType   string         `json:"rateLimitType"`
+	OverageStatus   string         `json:"overageStatus,omitempty"`
+	OverageResetsAt int64          `json:"overageResetsAt,omitempty"`
+	IsUsingOverage  bool           `json:"isUsingOverage,omitempty"`
+	Raw             map[string]any `json:"-"`
 }
 
 // RateLimitEventMessage is a session heartbeat from the CLI announcing the
