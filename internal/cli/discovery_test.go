@@ -156,6 +156,97 @@ func TestEffortFlagSupport(t *testing.T) {
 	assertNotContainsArg(t, cmd, "--effort")
 }
 
+// TestThinkingFlagSupport tests the CLI flags for Thinking and MaxThinkingTokens.
+func TestThinkingFlagSupport(t *testing.T) {
+	tests := []struct {
+		name     string
+		options  *shared.Options
+		want     [][2]string
+		notWants []string
+	}{
+		{
+			name:     "no thinking options emit no flags",
+			options:  &shared.Options{},
+			notWants: []string{"--thinking", "--max-thinking-tokens", "--thinking-display"},
+		},
+		{
+			name:     "max thinking tokens",
+			options:  &shared.Options{MaxThinkingTokens: 5000},
+			want:     [][2]string{{"--max-thinking-tokens", "5000"}},
+			notWants: []string{"--thinking"},
+		},
+		{
+			name:     "adaptive",
+			options:  &shared.Options{Thinking: shared.ThinkingConfigAdaptive{}},
+			want:     [][2]string{{"--thinking", "adaptive"}},
+			notWants: []string{"--max-thinking-tokens", "--thinking-display"},
+		},
+		{
+			name:     "adaptive pointer",
+			options:  &shared.Options{Thinking: &shared.ThinkingConfigAdaptive{}},
+			want:     [][2]string{{"--thinking", "adaptive"}},
+			notWants: []string{"--max-thinking-tokens"},
+		},
+		{
+			name:     "enabled",
+			options:  &shared.Options{Thinking: shared.ThinkingConfigEnabled{BudgetTokens: 2000}},
+			want:     [][2]string{{"--max-thinking-tokens", "2000"}},
+			notWants: []string{"--thinking", "--thinking-display"},
+		},
+		{
+			name:     "disabled",
+			options:  &shared.Options{Thinking: shared.ThinkingConfigDisabled{}},
+			want:     [][2]string{{"--thinking", "disabled"}},
+			notWants: []string{"--max-thinking-tokens", "--thinking-display"},
+		},
+		{
+			name: "adaptive with display",
+			options: &shared.Options{Thinking: shared.ThinkingConfigAdaptive{
+				Display: shared.ThinkingDisplaySummarized,
+			}},
+			want: [][2]string{{"--thinking", "adaptive"}, {"--thinking-display", "summarized"}},
+		},
+		{
+			name: "enabled with display",
+			options: &shared.Options{Thinking: shared.ThinkingConfigEnabled{
+				BudgetTokens: 2000,
+				Display:      shared.ThinkingDisplayOmitted,
+			}},
+			want: [][2]string{{"--max-thinking-tokens", "2000"}, {"--thinking-display", "omitted"}},
+		},
+		{
+			name: "thinking takes precedence over max thinking tokens",
+			options: &shared.Options{
+				MaxThinkingTokens: 9000,
+				Thinking:          shared.ThinkingConfigEnabled{BudgetTokens: 2000},
+			},
+			want:     [][2]string{{"--max-thinking-tokens", "2000"}},
+			notWants: []string{"9000"},
+		},
+		{
+			name: "disabled takes precedence over max thinking tokens",
+			options: &shared.Options{
+				MaxThinkingTokens: 9000,
+				Thinking:          shared.ThinkingConfigDisabled{},
+			},
+			want:     [][2]string{{"--thinking", "disabled"}},
+			notWants: []string{"--max-thinking-tokens"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := BuildCommand("/usr/local/bin/claude", test.options)
+			for _, pair := range test.want {
+				assertContainsArgs(t, cmd, pair[0], pair[1])
+			}
+			for _, arg := range test.notWants {
+				assertNotContainsArg(t, cmd, arg)
+			}
+		})
+	}
+}
+
 // TestCLIDiscoveryLocations tests CLI discovery path generation
 func TestCLIDiscoveryLocations(t *testing.T) {
 	locations := getCommonCLILocations()

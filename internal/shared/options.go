@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 )
 
 const (
-	// DefaultMaxThinkingTokens is the default maximum number of thinking tokens.
+	// DefaultMaxThinkingTokens was the default for MaxThinkingTokens.
+	//
+	// Deprecated: NewOptions no longer applies a default, so the CLI chooses.
 	DefaultMaxThinkingTokens = 8000
 )
 
@@ -150,6 +153,63 @@ const (
 	EffortMax EffortLevel = "max"
 )
 
+// ThinkingDisplay controls how the CLI returns thinking content.
+type ThinkingDisplay string
+
+const (
+	// ThinkingDisplaySummarized returns a summary of the thinking.
+	ThinkingDisplaySummarized ThinkingDisplay = "summarized"
+	// ThinkingDisplayOmitted omits the thinking content.
+	ThinkingDisplayOmitted ThinkingDisplay = "omitted"
+)
+
+// ThinkingConfig controls extended thinking. The implementations are
+// ThinkingConfigAdaptive, ThinkingConfigEnabled and ThinkingConfigDisabled.
+type ThinkingConfig interface {
+	thinkingArgs() []string
+}
+
+// ThinkingConfigAdaptive lets the model decide how much to think.
+type ThinkingConfigAdaptive struct {
+	Display ThinkingDisplay
+}
+
+// ThinkingConfigEnabled sets a fixed token budget for thinking.
+type ThinkingConfigEnabled struct {
+	BudgetTokens int
+	Display      ThinkingDisplay
+}
+
+// ThinkingConfigDisabled turns thinking off.
+type ThinkingConfigDisabled struct{}
+
+func (c ThinkingConfigAdaptive) thinkingArgs() []string {
+	return appendThinkingDisplay([]string{"--thinking", "adaptive"}, c.Display)
+}
+
+func (c ThinkingConfigEnabled) thinkingArgs() []string {
+	return appendThinkingDisplay([]string{"--max-thinking-tokens", strconv.Itoa(c.BudgetTokens)}, c.Display)
+}
+
+func (ThinkingConfigDisabled) thinkingArgs() []string {
+	return []string{"--thinking", "disabled"}
+}
+
+func appendThinkingDisplay(args []string, display ThinkingDisplay) []string {
+	if display == "" {
+		return args
+	}
+	return append(args, "--thinking-display", string(display))
+}
+
+// ThinkingArgs returns the CLI flags for cfg, or nil when cfg is nil.
+func ThinkingArgs(cfg ThinkingConfig) []string {
+	if cfg == nil {
+		return nil
+	}
+	return cfg.thinkingArgs()
+}
+
 // AgentDefinition defines a programmatic subagent.
 type AgentDefinition struct {
 	// Description is a brief description of the agent's purpose.
@@ -184,7 +244,10 @@ type Options struct {
 	Model              *string `json:"model,omitempty"`
 	FallbackModel      *string `json:"fallback_model,omitempty"`
 	Effort             *string `json:"effort,omitempty"`
-	MaxThinkingTokens  int     `json:"max_thinking_tokens,omitempty"`
+	// Thinking controls extended thinking and takes precedence over MaxThinkingTokens.
+	Thinking ThinkingConfig `json:"-"`
+	// MaxThinkingTokens sets a thinking budget when Thinking is nil; 0 means unset.
+	MaxThinkingTokens int `json:"max_thinking_tokens,omitempty"`
 
 	// Budget & Billing
 	MaxBudgetUSD *float64 `json:"max_budget_usd,omitempty"`
@@ -458,14 +521,13 @@ func (o *Options) Validate() error {
 // NewOptions creates Options with default values.
 func NewOptions() *Options {
 	return &Options{
-		AllowedTools:      []string{},
-		DisallowedTools:   []string{},
-		Betas:             []SdkBeta{},
-		MaxThinkingTokens: DefaultMaxThinkingTokens,
-		AddDirs:           []string{},
-		McpServers:        make(map[string]McpServerConfig),
-		Plugins:           []SdkPluginConfig{},
-		ExtraArgs:         make(map[string]*string),
-		ExtraEnv:          make(map[string]string),
+		AllowedTools:    []string{},
+		DisallowedTools: []string{},
+		Betas:           []SdkBeta{},
+		AddDirs:         []string{},
+		McpServers:      make(map[string]McpServerConfig),
+		Plugins:         []SdkPluginConfig{},
+		ExtraArgs:       make(map[string]*string),
+		ExtraEnv:        make(map[string]string),
 	}
 }

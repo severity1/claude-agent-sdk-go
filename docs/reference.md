@@ -775,9 +775,34 @@ Set a maximum cost budget.
 func WithMaxBudgetUSD(budget float64) Option
 ```
 
+#### `WithThinking()`
+
+Set the extended thinking mode. It takes precedence over `WithMaxThinkingTokens()`.
+
+```go
+func WithThinking(config ThinkingConfig) Option
+```
+
+```go
+type ThinkingConfigAdaptive struct { Display ThinkingDisplay }                  // --thinking adaptive
+type ThinkingConfigEnabled struct { BudgetTokens int; Display ThinkingDisplay } // --max-thinking-tokens N
+type ThinkingConfigDisabled struct{}                                            // --thinking disabled
+
+const (
+    ThinkingDisplaySummarized ThinkingDisplay = "summarized" // --thinking-display summarized
+    ThinkingDisplayOmitted    ThinkingDisplay = "omitted"    // --thinking-display omitted
+)
+```
+
+An empty `Display` sends no `--thinking-display` flag. `ThinkingConfigDisabled` never sends it.
+
+```go
+claudecode.WithThinking(claudecode.ThinkingConfigAdaptive{Display: claudecode.ThinkingDisplaySummarized})
+```
+
 #### `WithMaxThinkingTokens()`
 
-Set maximum tokens for thinking blocks.
+Deprecated: use `WithThinking(ThinkingConfigEnabled{BudgetTokens: n})`. Set the maximum tokens for thinking (`--max-thinking-tokens`). The value 0 sends no flag. The SDK sets no default, so the CLI chooses.
 
 ```go
 func WithMaxThinkingTokens(tokens int) Option

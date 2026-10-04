@@ -15,7 +15,8 @@ func TestOptionsDefaults(t *testing.T) {
 		field    interface{}
 		expected interface{}
 	}{
-		{"MaxThinkingTokens", options.MaxThinkingTokens, 8000},
+		{"MaxThinkingTokens", options.MaxThinkingTokens, 0},
+		{"Thinking_nil", options.Thinking == nil, true},
 		{"ContinueConversation", options.ContinueConversation, false},
 		{"MaxTurns", options.MaxTurns, 0},
 		{"AllowedTools_initialized", options.AllowedTools == nil, false},

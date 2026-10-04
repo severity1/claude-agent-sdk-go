@@ -60,6 +60,21 @@ type OutputFormat = shared.OutputFormat
 // EffortLevel controls how many tokens Claude spends per response.
 type EffortLevel = shared.EffortLevel
 
+// ThinkingConfig controls extended thinking (see WithThinking).
+type ThinkingConfig = shared.ThinkingConfig
+
+// ThinkingConfigAdaptive lets the model decide how much to think.
+type ThinkingConfigAdaptive = shared.ThinkingConfigAdaptive
+
+// ThinkingConfigEnabled sets a fixed token budget for thinking.
+type ThinkingConfigEnabled = shared.ThinkingConfigEnabled
+
+// ThinkingConfigDisabled turns thinking off.
+type ThinkingConfigDisabled = shared.ThinkingConfigDisabled
+
+// ThinkingDisplay controls how the CLI returns thinking content.
+type ThinkingDisplay = shared.ThinkingDisplay
+
 // CanUseToolCallback is invoked when CLI requests permission to use a tool.
 // The callback receives tool name, input parameters, and permission context.
 // Return PermissionResultAllow to permit, PermissionResultDeny to deny.
@@ -110,6 +125,8 @@ const (
 	EffortHigh                      = shared.EffortHigh
 	EffortXHigh                     = shared.EffortXHigh
 	EffortMax                       = shared.EffortMax
+	ThinkingDisplaySummarized       = shared.ThinkingDisplaySummarized
+	ThinkingDisplayOmitted          = shared.ThinkingDisplayOmitted
 )
 
 // Permission update type constants
@@ -220,7 +237,18 @@ func WithMaxBufferSize(size int) Option {
 	}
 }
 
-// WithMaxThinkingTokens sets the maximum thinking tokens.
+// WithThinking sets the extended thinking mode (--thinking or
+// --max-thinking-tokens, plus --thinking-display). It takes precedence over
+// WithMaxThinkingTokens.
+func WithThinking(config ThinkingConfig) Option {
+	return func(o *Options) {
+		o.Thinking = config
+	}
+}
+
+// WithMaxThinkingTokens sets the maximum thinking tokens (--max-thinking-tokens).
+//
+// Deprecated: Use WithThinking with ThinkingConfigEnabled.
 func WithMaxThinkingTokens(tokens int) Option {
 	return func(o *Options) {
 		o.MaxThinkingTokens = tokens

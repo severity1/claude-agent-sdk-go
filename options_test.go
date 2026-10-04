@@ -16,7 +16,7 @@ func TestDefaultOptions(t *testing.T) {
 	options := NewOptions()
 
 	// Verify that functional options work with shared types
-	assertOptionsMaxThinkingTokens(t, options, 8000)
+	assertOptionsMaxThinkingTokens(t, options, 0)
 
 	// Test that we can apply functional options
 	optionsWithPrompt := NewOptions(WithSystemPrompt("test prompt"))
@@ -437,6 +437,27 @@ func TestExtraArgsSupport(t *testing.T) {
 	}
 }
 
+func TestWithThinking(t *testing.T) {
+	tests := []struct {
+		name   string
+		config ThinkingConfig
+	}{
+		{"adaptive", ThinkingConfigAdaptive{Display: ThinkingDisplaySummarized}},
+		{"enabled", ThinkingConfigEnabled{BudgetTokens: 2000, Display: ThinkingDisplayOmitted}},
+		{"disabled", ThinkingConfigDisabled{}},
+		{"adaptive pointer", &ThinkingConfigAdaptive{}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			options := NewOptions(WithThinking(test.config))
+			if options.Thinking != test.config {
+				t.Errorf("Expected Thinking = %#v, got %#v", test.config, options.Thinking)
+			}
+		})
+	}
+}
+
 func TestOptionsValidationIntegration(t *testing.T) {
 	// Test that validation works through functional options API (detailed tests in internal/shared)
 	validOptions := NewOptions(
@@ -456,18 +477,18 @@ func TestNewOptionsConstructor(t *testing.T) {
 
 	// Test NewOptions with no arguments should return defaults
 	defaultOptions := NewOptions()
-	assertOptionsMaxThinkingTokens(t, defaultOptions, 8000)
+	assertOptionsMaxThinkingTokens(t, defaultOptions, 0)
 	assertOptionsStringSlice(t, defaultOptions.AllowedTools, []string{}, "AllowedTools")
 
 	// Test NewOptions with single functional option
 	singleOptionOptions := NewOptions(WithSystemPrompt("Single option test"))
 	assertOptionsSystemPrompt(t, singleOptionOptions, "Single option test")
 	// Should still have defaults for other fields
-	assertOptionsMaxThinkingTokens(t, singleOptionOptions, 8000)
+	assertOptionsMaxThinkingTokens(t, singleOptionOptions, 0)
 
 	// Test NewOptions with multiple functional options applied in order
 	multipleOptions := NewOptions(
-		WithMaxThinkingTokens(5000),               // Override default
+		WithMaxThinkingTokens(5000),               // Set a value
 		WithAllowedTools("Read"),                  // Add tools
 		WithSystemPrompt("First prompt"),          // Set system prompt
 		WithMaxThinkingTokens(12000),              // Override again (should win)

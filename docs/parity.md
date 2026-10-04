@@ -27,7 +27,7 @@ Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (d
 | Content block types | 6 | 4 | `ServerToolUseBlock` and `ServerToolResultBlock` pending |
 | Error types | 7 | 6 (+`BaseError`) | `ResultError` pending |
 | Permission modes | 6 | 4 | `dontAsk` and `auto` pending |
-| Option fields | 49 (`ClaudeAgentOptions`) | 40 (`Options`), 63 `With*` constructors | See the option table for the missing fields |
+| Option fields | 49 (`ClaudeAgentOptions`) | 41 (`Options`), 64 `With*` constructors | See the option table for the missing fields |
 | Sandbox config | 3 types | 3 types | 4 `SandboxNetworkConfig` fields pending |
 
 
@@ -126,10 +126,10 @@ These contributor PRs merged on Oct 4, 2026, after v0.8.0. The table maps each o
 | `model` | `WithModel(model)` | PARITY |
 | `fallback_model` | `WithFallbackModel(model)` | PARITY |
 | `effort` | `WithEffort(effort)` | PARITY |
-| `thinking` | - | PENDING (README #7) |
+| `thinking` | `WithThinking(config)` | PARITY (`ThinkingConfigAdaptive`, `ThinkingConfigEnabled`, `ThinkingConfigDisabled`; `display` as `ThinkingDisplay`) |
 | `max_turns` | `WithMaxTurns(turns)` | PARITY |
 | `max_budget_usd` | `WithMaxBudgetUSD(budget)` | PARITY |
-| `max_thinking_tokens` | `WithMaxThinkingTokens(tokens)` | PARITY |
+| `max_thinking_tokens` | `WithMaxThinkingTokens(tokens)` | PARITY (deprecated in both; Go treats 0 as unset, so use `ThinkingConfigDisabled` to turn thinking off) |
 | `task_budget` | - | PENDING (README #33) |
 | `permission_mode` | `WithPermissionMode(mode)` | PARITY |
 | `permission_prompt_tool_name` | `WithPermissionPromptToolName(toolName)` | PARITY |
@@ -492,6 +492,15 @@ Go SDK provides idiomatic helper functions following the `os.IsNotExist` pattern
 | `"high"` | `EffortHigh` | PARITY |
 | `"xhigh"` | `EffortXHigh` | PARITY |
 | `"max"` | `EffortMax` | PARITY |
+
+### Thinking Config
+
+| Python | Go | Status |
+|:-------|:---|:-------|
+| `ThinkingConfigAdaptive` (`--thinking adaptive`) | `ThinkingConfigAdaptive` | PARITY |
+| `ThinkingConfigEnabled` (`--max-thinking-tokens N`) | `ThinkingConfigEnabled` | PARITY |
+| `ThinkingConfigDisabled` (`--thinking disabled`) | `ThinkingConfigDisabled` | PARITY |
+| `ThinkingDisplay` `"summarized"`, `"omitted"` (`--thinking-display`) | `ThinkingDisplaySummarized`, `ThinkingDisplayOmitted` | PARITY |
 
 ### Plugin Types
 
