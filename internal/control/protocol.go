@@ -707,6 +707,38 @@ func (p *Protocol) StopTask(ctx context.Context, taskID string) error {
 	return err
 }
 
+// mcpControlTimeout is longer than other requests because a reconnect starts the server process.
+const mcpControlTimeout = 60 * time.Second
+
+// ReconnectMcpServer reconnects a disconnected or failed MCP server.
+// Returns error if the CLI rejects the request or the request times out.
+func (p *Protocol) ReconnectMcpServer(ctx context.Context, serverName string) error {
+	if serverName == "" {
+		return fmt.Errorf("reconnect mcp server: server name is empty")
+	}
+	_, err := p.SendControlRequest(ctx, McpReconnectRequest{
+		Subtype:    SubtypeMcpReconnect,
+		ServerName: serverName,
+	}, mcpControlTimeout)
+
+	return err
+}
+
+// ToggleMcpServer enables or disables an MCP server.
+// Returns error if the CLI rejects the request or the request times out.
+func (p *Protocol) ToggleMcpServer(ctx context.Context, serverName string, enabled bool) error {
+	if serverName == "" {
+		return fmt.Errorf("toggle mcp server: server name is empty")
+	}
+	_, err := p.SendControlRequest(ctx, McpToggleRequest{
+		Subtype:    SubtypeMcpToggle,
+		ServerName: serverName,
+		Enabled:    enabled,
+	}, mcpControlTimeout)
+
+	return err
+}
+
 // ReceiveMessages returns a channel for receiving regular (non-control) messages.
 func (p *Protocol) ReceiveMessages() <-chan map[string]any {
 	return p.messageStream

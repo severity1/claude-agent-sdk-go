@@ -252,6 +252,10 @@ type Transport interface {
 	// StopTask stops a single running task by the task_id from its
 	// task_started system message.
 	StopTask(ctx context.Context, taskID string) error
+	// ReconnectMcpServer reconnects a disconnected or failed MCP server.
+	ReconnectMcpServer(ctx context.Context, serverName string) error
+	// ToggleMcpServer enables or disables an MCP server.
+	ToggleMcpServer(ctx context.Context, serverName string, enabled bool) error
 	Close() error
 	GetValidator() *StreamValidator
 }

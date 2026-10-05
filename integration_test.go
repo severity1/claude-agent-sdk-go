@@ -597,6 +597,38 @@ func (i *integrationMockTransport) EndInput(_ context.Context) error {
 	return nil
 }
 
+func (i *integrationMockTransport) SetModel(_ context.Context, _ *string) error {
+	return nil
+}
+
+func (i *integrationMockTransport) SetPermissionMode(_ context.Context, _ claudecode.PermissionMode) error {
+	return nil
+}
+
+func (i *integrationMockTransport) RewindFiles(_ context.Context, _ string) error {
+	return nil
+}
+
+func (i *integrationMockTransport) GetMcpStatus(_ context.Context) (*claudecode.McpStatusResponse, error) {
+	return &claudecode.McpStatusResponse{}, nil
+}
+
+func (i *integrationMockTransport) StopTask(_ context.Context, _ string) error {
+	return nil
+}
+
+func (i *integrationMockTransport) ReconnectMcpServer(_ context.Context, _ string) error {
+	return nil
+}
+
+func (i *integrationMockTransport) ToggleMcpServer(_ context.Context, _ string, _ bool) error {
+	return nil
+}
+
+func (i *integrationMockTransport) GetValidator() *claudecode.StreamValidator {
+	return &claudecode.StreamValidator{}
+}
+
 func (i *integrationMockTransport) Close() error {
 	i.mu.Lock()
 	defer i.mu.Unlock()

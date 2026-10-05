@@ -371,6 +371,8 @@ type Client interface {
     RewindFiles(ctx context.Context, messageUUID string) error
     GetMcpStatus(ctx context.Context) (*McpStatusResponse, error)
     StopTask(ctx context.Context, taskID string) error
+    ReconnectMcpServer(ctx context.Context, serverName string) error
+    ToggleMcpServer(ctx context.Context, serverName string, enabled bool) error
     GetStreamIssues() []StreamIssue
     GetStreamStats() StreamStats
     GetServerInfo(ctx context.Context) (map[string]interface{}, error)
@@ -487,6 +489,27 @@ func (c *ClientImpl) StopTask(ctx context.Context, taskID string) error
 
 The CLI then reports the task's end as a `TaskUpdatedMessage` whose status is `killed`. A `TaskNotificationMessage` with status `stopped` may follow, but the CLI sometimes omits it, so clear the task on a terminal status from either message (`IsTerminalTaskStatus`).
 
+#### `ReconnectMcpServer()`
+
+Reconnect a disconnected or failed MCP server by the name from its configuration. Sends the `mcp_reconnect` control request. Returns the CLI's error for an unknown server name. Only works after `Connect()`.
+
+```go
+func (c *ClientImpl) ReconnectMcpServer(ctx context.Context, serverName string) error
+```
+
+#### `ToggleMcpServer()`
+
+Enable or disable an MCP server by the name from its configuration. Sends the `mcp_toggle` control request. A disabled server shows the status `disabled` in `GetMcpStatus()`. Returns the CLI's error for an unknown server name. Only works after `Connect()`.
+
+```go
+func (c *ClientImpl) ToggleMcpServer(ctx context.Context, serverName string, enabled bool) error
+
+err := client.ToggleMcpServer(ctx, "github", false) // disable
+err = client.ToggleMcpServer(ctx, "github", true)   // enable again
+```
+
+Both requests wait up to 60 seconds for the CLI, because a reconnect starts the server process. An empty server name returns an error without a request.
+
 #### `GetStreamIssues()`
 
 Get validation issues from the stream.
@@ -521,7 +544,7 @@ func (c *ClientImpl) Done() <-chan struct{}
 
 #### `Err()`
 
-Get why the CLI process stopped. Returns nil while it runs, a `*ProcessError` for a non-zero exit (`ExitCode` is -1 for a signal), a `*ConnectionError` for a clean exit, and a `*ConnectionError` that wraps `ErrNotConnected` before `Connect()` and after `Disconnect()`. `Done()` and `Err()` never wait for a running `Disconnect()`. Once the process is gone, `Query`, `QueryWithSession`, `QueryStream`, `Interrupt`, `SetModel`, `SetPermissionMode`, `RewindFiles` and `GetMcpStatus` return a `*ConnectionError` that wraps it (Python raises `CLIConnectionError` from the exit error).
+Get why the CLI process stopped. Returns nil while it runs, a `*ProcessError` for a non-zero exit (`ExitCode` is -1 for a signal), a `*ConnectionError` for a clean exit, and a `*ConnectionError` that wraps `ErrNotConnected` before `Connect()` and after `Disconnect()`. `Done()` and `Err()` never wait for a running `Disconnect()`. Once the process is gone, `Query`, `QueryWithSession`, `QueryStream`, `Interrupt`, `SetModel`, `SetPermissionMode`, `RewindFiles`, `GetMcpStatus`, `StopTask`, `ReconnectMcpServer` and `ToggleMcpServer` return a `*ConnectionError` that wraps it (Python raises `CLIConnectionError` from the exit error).
 
 ```go
 func (c *ClientImpl) Err() error
@@ -2742,6 +2765,8 @@ type Transport interface {
     RewindFiles(ctx context.Context, userMessageID string) error
     GetMcpStatus(ctx context.Context) (*McpStatusResponse, error)
     StopTask(ctx context.Context, taskID string) error
+    ReconnectMcpServer(ctx context.Context, serverName string) error
+    ToggleMcpServer(ctx context.Context, serverName string, enabled bool) error
     Close() error
     GetValidator() *StreamValidator
 }

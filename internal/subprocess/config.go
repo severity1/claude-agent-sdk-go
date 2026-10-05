@@ -136,6 +136,24 @@ func (t *Transport) StopTask(ctx context.Context, taskID string) error {
 	return protocol.StopTask(ctx, taskID)
 }
 
+// ReconnectMcpServer reconnects a disconnected or failed MCP server.
+func (t *Transport) ReconnectMcpServer(ctx context.Context, serverName string) error {
+	protocol, err := t.connectedProtocol()
+	if err != nil {
+		return err
+	}
+	return protocol.ReconnectMcpServer(ctx, serverName)
+}
+
+// ToggleMcpServer enables or disables an MCP server.
+func (t *Transport) ToggleMcpServer(ctx context.Context, serverName string, enabled bool) error {
+	protocol, err := t.connectedProtocol()
+	if err != nil {
+		return err
+	}
+	return protocol.ToggleMcpServer(ctx, serverName, enabled)
+}
+
 // buildProtocolOptions constructs control protocol options from transport configuration.
 func (t *Transport) buildProtocolOptions() []control.ProtocolOption {
 	var opts []control.ProtocolOption

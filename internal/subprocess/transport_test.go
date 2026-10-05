@@ -686,7 +686,8 @@ func TestTransportInterruptErrorPaths(t *testing.T) {
 // TestTransportControlProtocolIntegration tests that SetModel and SetPermissionMode
 // work through the control protocol when properly wired.
 func TestTransportControlProtocolIntegration(t *testing.T) {
-	ctx, cancel := setupTransportTestContext(t, 10*time.Second)
+	// Each subtest spawns the test binary, which is slow under -race.
+	ctx, cancel := setupTransportTestContext(t, 30*time.Second)
 	defer cancel()
 
 	tests := []struct {
@@ -775,6 +776,50 @@ func TestTransportControlProtocolIntegration(t *testing.T) {
 			},
 			operation: func(ctx context.Context, t *Transport) error {
 				return t.StopTask(ctx, "task-abc123")
+			},
+			wantErr:   false,
+			errSubstr: "",
+		},
+		{
+			name: "ReconnectMcpServer_requires_connection",
+			setup: func() *Transport {
+				return setupTransportForTest(t, newTransportMockCLI(t))
+			},
+			operation: func(ctx context.Context, t *Transport) error {
+				return t.ReconnectMcpServer(ctx, "my-server")
+			},
+			wantErr:   true,
+			errSubstr: "not connected",
+		},
+		{
+			name: "ReconnectMcpServer_in_streaming_mode_with_protocol",
+			setup: func() *Transport {
+				return setupTransportForTest(t, newTransportMockCLIWithControlProtocol(t))
+			},
+			operation: func(ctx context.Context, t *Transport) error {
+				return t.ReconnectMcpServer(ctx, "my-server")
+			},
+			wantErr:   false,
+			errSubstr: "",
+		},
+		{
+			name: "ToggleMcpServer_requires_connection",
+			setup: func() *Transport {
+				return setupTransportForTest(t, newTransportMockCLI(t))
+			},
+			operation: func(ctx context.Context, t *Transport) error {
+				return t.ToggleMcpServer(ctx, "my-server", false)
+			},
+			wantErr:   true,
+			errSubstr: "not connected",
+		},
+		{
+			name: "ToggleMcpServer_in_streaming_mode_with_protocol",
+			setup: func() *Transport {
+				return setupTransportForTest(t, newTransportMockCLIWithControlProtocol(t))
+			},
+			operation: func(ctx context.Context, t *Transport) error {
+				return t.ToggleMcpServer(ctx, "my-server", false)
 			},
 			wantErr:   false,
 			errSubstr: "",

@@ -1141,6 +1141,8 @@ func TestClientCallsFailAfterProcessExit(t *testing.T) {
 		{"RewindFiles", func(c Client) error { return c.RewindFiles(ctx, "uuid-1") }},
 		{"GetMcpStatus", func(c Client) error { _, err := c.GetMcpStatus(ctx); return err }},
 		{"StopTask", func(c Client) error { return c.StopTask(ctx, "task-1") }},
+		{"ReconnectMcpServer", func(c Client) error { return c.ReconnectMcpServer(ctx, "my-server") }},
+		{"ToggleMcpServer", func(c Client) error { return c.ToggleMcpServer(ctx, "my-server", false) }},
 	}
 
 	for _, test := range calls {
@@ -1329,6 +1331,8 @@ func TestClientNotConnectedErrors(t *testing.T) {
 		{"RewindFiles", func(c Client) error { return c.RewindFiles(ctx, "uuid-1") }},
 		{"GetMcpStatus", func(c Client) error { _, err := c.GetMcpStatus(ctx); return err }},
 		{"StopTask", func(c Client) error { return c.StopTask(ctx, "task-1") }},
+		{"ReconnectMcpServer", func(c Client) error { return c.ReconnectMcpServer(ctx, "my-server") }},
+		{"ToggleMcpServer", func(c Client) error { return c.ToggleMcpServer(ctx, "my-server", false) }},
 		{"GetServerInfo", func(c Client) error { _, err := c.GetServerInfo(ctx); return err }},
 		{"Err", func(c Client) error { return c.Err() }},
 	}
@@ -1644,6 +1648,8 @@ type clientMockTransport struct {
 	getMcpStatusResponse   *McpStatusResponse
 	stopTaskError          error
 	stoppedTaskIDs         []string
+	mcpControlError        error
+	mcpControlCalls        []string
 }
 
 func (c *clientMockTransport) Connect(ctx context.Context) error {
@@ -1989,6 +1995,30 @@ func (c *clientMockTransport) StopTask(_ context.Context, taskID string) error {
 	return nil
 }
 
+func (c *clientMockTransport) ReconnectMcpServer(_ context.Context, serverName string) error {
+	return c.recordMcpControl("reconnect " + serverName)
+}
+
+func (c *clientMockTransport) ToggleMcpServer(_ context.Context, serverName string, enabled bool) error {
+	return c.recordMcpControl(fmt.Sprintf("toggle %s enabled=%t", serverName, enabled))
+}
+
+func (c *clientMockTransport) recordMcpControl(call string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mcpControlError != nil {
+		return c.mcpControlError
+	}
+	c.mcpControlCalls = append(c.mcpControlCalls, call)
+	return nil
+}
+
+func (c *clientMockTransport) getMcpControlCalls() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.mcpControlCalls...)
+}
+
 func (c *clientMockTransport) getStoppedTaskIDs() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -2040,6 +2070,10 @@ func WithClientGetMcpStatusResponse(resp *McpStatusResponse) ClientMockTransport
 
 func WithClientStopTaskError(err error) ClientMockTransportOption {
 	return func(t *clientMockTransport) { t.stopTaskError = err }
+}
+
+func WithClientMcpControlError(err error) ClientMockTransportOption {
+	return func(t *clientMockTransport) { t.mcpControlError = err }
 }
 
 // Factory Functions - streamlined creation methods
@@ -3678,6 +3712,63 @@ func TestClientStopTask(t *testing.T) {
 			assertClientErrorContains(t, err, tt.wantErr)
 			if got := transport.getStoppedTaskIDs(); fmt.Sprint(got) != fmt.Sprint(tt.wantStopped) {
 				t.Errorf("stopped task IDs = %v, want %v", got, tt.wantStopped)
+			}
+		})
+	}
+}
+
+// TestClientMcpServerControl tests ReconnectMcpServer and ToggleMcpServer
+// delegation through the client layer.
+func TestClientMcpServerControl(t *testing.T) {
+	reconnect := func(ctx context.Context, c Client) error { return c.ReconnectMcpServer(ctx, "my-server") }
+	toggleOff := func(ctx context.Context, c Client) error { return c.ToggleMcpServer(ctx, "my-server", false) }
+	toggleOn := func(ctx context.Context, c Client) error { return c.ToggleMcpServer(ctx, "my-server", true) }
+
+	tests := []struct {
+		name        string
+		call        func(context.Context, Client) error
+		options     []ClientMockTransportOption
+		connect     bool
+		cancelFirst bool
+		wantErr     string
+		wantCalls   []string
+	}{
+		{name: "reconnect", call: reconnect, connect: true, wantCalls: []string{"reconnect my-server"}},
+		{name: "reconnect_not_connected", call: reconnect, wantErr: "not connected"},
+		{name: "toggle_disable", call: toggleOff, connect: true, wantCalls: []string{"toggle my-server enabled=false"}},
+		{name: "toggle_enable", call: toggleOn, connect: true, wantCalls: []string{"toggle my-server enabled=true"}},
+		{name: "toggle_not_connected", call: toggleOn, wantErr: "not connected"},
+		{name: "context_cancelled", call: reconnect, connect: true, cancelFirst: true, wantErr: "context canceled"},
+		{
+			name:    "transport_error",
+			call:    toggleOn,
+			options: []ClientMockTransportOption{WithClientMcpControlError(errors.New("server not found"))},
+			connect: true,
+			wantErr: "server not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := setupClientTestContext(t, 5*time.Second)
+			defer cancel()
+
+			transport := newClientMockTransportWithOptions(tt.options...)
+			client := setupClientForTest(t, transport)
+			defer disconnectClientSafely(t, client)
+
+			if tt.connect {
+				connectClientSafely(ctx, t, client)
+			}
+			if tt.cancelFirst {
+				cancel()
+			}
+
+			err := tt.call(ctx, client)
+
+			assertClientErrorContains(t, err, tt.wantErr)
+			if got := transport.getMcpControlCalls(); fmt.Sprint(got) != fmt.Sprint(tt.wantCalls) {
+				t.Errorf("MCP control calls = %v, want %v", got, tt.wantCalls)
 			}
 		})
 	}
