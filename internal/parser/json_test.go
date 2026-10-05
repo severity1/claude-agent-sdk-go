@@ -1302,6 +1302,57 @@ func TestResultMessageOptionalFields(t *testing.T) {
 	}
 }
 
+// TestResultMessageStopReason tests that stop_reason keeps nil for absent and null values.
+func TestResultMessageStopReason(t *testing.T) {
+	parser := setupParserTest(t)
+	stopReasonEndTurn := "end_turn"
+
+	tests := []struct {
+		name       string
+		stopReason any
+		present    bool
+		want       *string
+	}{
+		{name: "absent", present: false, want: nil},
+		{name: "end_turn", stopReason: "end_turn", present: true, want: &stopReasonEndTurn},
+		{name: "null", stopReason: nil, present: true, want: nil},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			data := map[string]any{
+				"type":            "result",
+				"subtype":         "success",
+				"duration_ms":     100.0,
+				"duration_api_ms": 50.0,
+				"is_error":        false,
+				"num_turns":       1.0,
+				"session_id":      "s123",
+			}
+			if test.present {
+				data["stop_reason"] = test.stopReason
+			}
+
+			msg, err := parser.ParseMessage(data)
+			assertNoParseError(t, err)
+			resultMsg, ok := msg.(*shared.ResultMessage)
+			if !ok {
+				t.Fatalf("Expected *ResultMessage, got %T", msg)
+				return
+			}
+			if test.want == nil {
+				if resultMsg.StopReason != nil {
+					t.Errorf("Expected nil StopReason, got %q", *resultMsg.StopReason)
+				}
+				return
+			}
+			if resultMsg.StopReason == nil || *resultMsg.StopReason != *test.want {
+				t.Errorf("Expected StopReason %q, got %v", *test.want, resultMsg.StopReason)
+			}
+		})
+	}
+}
+
 // TestContentBlockErrorConditions tests uncovered content block parsing paths
 func TestContentBlockErrorConditions(t *testing.T) {
 	parser := setupParserTest(t)

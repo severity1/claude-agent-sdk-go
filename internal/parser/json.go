@@ -337,7 +337,16 @@ func (p *Parser) parseResultMessage(data map[string]any) (*shared.ResultMessage,
 		return nil, shared.NewMessageParseError("result message missing session_id field", data)
 	}
 
-	// Optional fields (no validation errors if missing)
+	parseResultOptionalFields(result, data)
+	return result, nil
+}
+
+// parseResultOptionalFields sets the fields that can be absent; a wrong type leaves the field unset.
+func parseResultOptionalFields(result *shared.ResultMessage, data map[string]any) {
+	if stopReason, ok := data["stop_reason"].(string); ok {
+		result.StopReason = &stopReason
+	}
+
 	if totalCostUSD, ok := data["total_cost_usd"].(float64); ok {
 		result.TotalCostUSD = &totalCostUSD
 	}
@@ -365,8 +374,6 @@ func (p *Parser) parseResultMessage(data map[string]any) (*shared.ResultMessage,
 			}
 		}
 	}
-
-	return result, nil
 }
 
 // parseContentBlocks parses content blocks and drops blocks of an unknown type.

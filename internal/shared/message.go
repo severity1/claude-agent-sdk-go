@@ -217,14 +217,16 @@ func (m *SystemMessage) MarshalJSON() ([]byte, error) {
 
 // ResultMessage represents the final result of a conversation turn.
 type ResultMessage struct {
-	MessageType      string          `json:"type"`
-	Subtype          string          `json:"subtype"`
-	DurationMs       int             `json:"duration_ms"`
-	DurationAPIMs    int             `json:"duration_api_ms"`
-	IsError          bool            `json:"is_error"`
-	Errors           []string        `json:"errors,omitempty"`
-	NumTurns         int             `json:"num_turns"`
-	SessionID        string          `json:"session_id"`
+	MessageType   string   `json:"type"`
+	Subtype       string   `json:"subtype"`
+	DurationMs    int      `json:"duration_ms"`
+	DurationAPIMs int      `json:"duration_api_ms"`
+	IsError       bool     `json:"is_error"`
+	Errors        []string `json:"errors,omitempty"`
+	NumTurns      int      `json:"num_turns"`
+	SessionID     string   `json:"session_id"`
+	// StopReason is why the model stopped, for example "end_turn"; nil when the CLI sent none.
+	StopReason       *string         `json:"stop_reason,omitempty"`
 	TotalCostUSD     *float64        `json:"total_cost_usd,omitempty"`
 	Usage            *map[string]any `json:"usage,omitempty"`
 	Result           *string         `json:"result,omitempty"`

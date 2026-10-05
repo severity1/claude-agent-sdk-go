@@ -195,7 +195,7 @@ These contributor PRs merged after v0.8.0: #164-#169 on Oct 4 (in v0.9.0), #187 
 | `UserMessage` | `UserMessage` struct | PARITY |
 | `AssistantMessage` | `AssistantMessage` struct | PARITY |
 | `SystemMessage` | `SystemMessage` struct | PARITY |
-| `ResultMessage` | `ResultMessage` struct | PARITY (some newer fields pending, for example `stop_reason`, `api_error_status`, `terminal_reason`, `model_usage`) |
+| `ResultMessage` | `ResultMessage` struct | PARITY (`stop_reason` is `StopReason *string`; some newer fields pending, for example `api_error_status`, `terminal_reason`, `model_usage`) |
 | `StreamEvent` | `StreamEvent` struct | PARITY |
 | `RateLimitEvent` | `RateLimitEventMessage` struct | PARITY (README #15; Go does not reject a message without `uuid` or `session_id`, and keeps the extra `IsUsingOverage`) |
 | `ConversationResetMessage` | `ConversationResetMessage` struct | PARITY |
@@ -325,16 +325,16 @@ Go SDK provides idiomatic helper functions following the `os.IsNotExist` pattern
 | Python | Go | Status |
 |:-------|:---|:-------|
 | `BaseHookInput` | `BaseHookInput` | PARITY |
-| `PreToolUseHookInput` | `PreToolUseHookInput` | PARITY (`agent_id`/`agent_type` pending, README #13) |
-| `PostToolUseHookInput` | `PostToolUseHookInput` | PARITY (`agent_id`/`agent_type` pending, README #13) |
-| `PostToolUseFailureHookInput` | `PostToolUseFailureHookInput` | PARITY (`agent_id`/`agent_type` pending, README #13) |
+| `PreToolUseHookInput` | `PreToolUseHookInput` | PARITY (`AgentID`/`AgentType` are `*string`, nil when absent) |
+| `PostToolUseHookInput` | `PostToolUseHookInput` | PARITY (`AgentID`/`AgentType` are `*string`, nil when absent) |
+| `PostToolUseFailureHookInput` | `PostToolUseFailureHookInput` | PARITY (`AgentID`/`AgentType` are `*string`, nil when absent) |
 | `UserPromptSubmitHookInput` | `UserPromptSubmitHookInput` | PARITY |
 | `StopHookInput` | `StopHookInput` | PARITY |
 | `SubagentStopHookInput` | `SubagentStopHookInput` | PARITY |
 | `PreCompactHookInput` | `PreCompactHookInput` | PARITY |
 | `NotificationHookInput` | `NotificationHookInput` | PARITY |
 | `SubagentStartHookInput` | `SubagentStartHookInput` | PARITY |
-| `PermissionRequestHookInput` | `PermissionRequestHookInput` | PARITY (`agent_id`/`agent_type` pending, README #13) |
+| `PermissionRequestHookInput` | `PermissionRequestHookInput` | PARITY (`AgentID`/`AgentType` are `*string`, nil when absent) |
 
 ### Hook Output Types
 

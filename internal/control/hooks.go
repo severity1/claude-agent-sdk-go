@@ -85,6 +85,8 @@ func (p *Protocol) parseHookInput(event HookEvent, inputData map[string]any) any
 			ToolName:      getString(inputData, "tool_name"),
 			ToolInput:     getMap(inputData, "tool_input"),
 			ToolUseID:     getString(inputData, "tool_use_id"),
+			AgentID:       getStringPtr(inputData, "agent_id"),
+			AgentType:     getStringPtr(inputData, "agent_type"),
 		}
 	case HookEventPostToolUse:
 		return &PostToolUseHookInput{
@@ -94,6 +96,8 @@ func (p *Protocol) parseHookInput(event HookEvent, inputData map[string]any) any
 			ToolInput:     getMap(inputData, "tool_input"),
 			ToolResponse:  inputData["tool_response"],
 			ToolUseID:     getString(inputData, "tool_use_id"),
+			AgentID:       getStringPtr(inputData, "agent_id"),
+			AgentType:     getStringPtr(inputData, "agent_type"),
 		}
 	case HookEventPostToolUseFailure:
 		return &PostToolUseFailureHookInput{
@@ -104,6 +108,8 @@ func (p *Protocol) parseHookInput(event HookEvent, inputData map[string]any) any
 			ToolUseID:     getString(inputData, "tool_use_id"),
 			Error:         getString(inputData, "error"),
 			IsInterrupt:   getBoolPtr(inputData, "is_interrupt"),
+			AgentID:       getStringPtr(inputData, "agent_id"),
+			AgentType:     getStringPtr(inputData, "agent_type"),
 		}
 	case HookEventUserPromptSubmit:
 		return &UserPromptSubmitHookInput{
@@ -155,6 +161,8 @@ func (p *Protocol) parseHookInput(event HookEvent, inputData map[string]any) any
 			ToolName:              getString(inputData, "tool_name"),
 			ToolInput:             getMap(inputData, "tool_input"),
 			PermissionSuggestions: getAnySlice(inputData, "permission_suggestions"),
+			AgentID:               getStringPtr(inputData, "agent_id"),
+			AgentType:             getStringPtr(inputData, "agent_type"),
 		}
 	default:
 		// Forward compatibility - return raw input for unknown events

@@ -53,6 +53,10 @@ type PreToolUseHookInput struct {
 	ToolInput map[string]any `json:"tool_input"`
 	// ToolUseID identifies the tool invocation.
 	ToolUseID string `json:"tool_use_id"`
+	// AgentID is set only when the hook fires inside a sub-agent.
+	AgentID *string `json:"agent_id,omitempty"`
+	// AgentType names the agent; also set on the main thread of a session started with --agent.
+	AgentType *string `json:"agent_type,omitempty"`
 }
 
 // PostToolUseHookInput is the input for PostToolUse hook events.
@@ -68,6 +72,10 @@ type PostToolUseHookInput struct {
 	ToolResponse any `json:"tool_response"`
 	// ToolUseID identifies the tool invocation.
 	ToolUseID string `json:"tool_use_id"`
+	// AgentID is set only when the hook fires inside a sub-agent.
+	AgentID *string `json:"agent_id,omitempty"`
+	// AgentType names the agent; also set on the main thread of a session started with --agent.
+	AgentType *string `json:"agent_type,omitempty"`
 }
 
 // PostToolUseFailureHookInput is the input for PostToolUseFailure hook events.
@@ -86,6 +94,10 @@ type PostToolUseFailureHookInput struct {
 	// IsInterrupt is true when the failure was caused by user interrupt.
 	// Optional; nil means the key was absent from JSON.
 	IsInterrupt *bool `json:"is_interrupt,omitempty"`
+	// AgentID is set only when the hook fires inside a sub-agent.
+	AgentID *string `json:"agent_id,omitempty"`
+	// AgentType names the agent; also set on the main thread of a session started with --agent.
+	AgentType *string `json:"agent_type,omitempty"`
 }
 
 // UserPromptSubmitHookInput is the input for UserPromptSubmit hook events.
@@ -169,6 +181,10 @@ type PermissionRequestHookInput struct {
 	// PermissionSuggestions carries CLI-provided permission suggestions.
 	// nil means the key was absent from JSON.
 	PermissionSuggestions []any `json:"permission_suggestions,omitempty"`
+	// AgentID is set only when the hook fires inside a sub-agent.
+	AgentID *string `json:"agent_id,omitempty"`
+	// AgentType names the agent; also set on the main thread of a session started with --agent.
+	AgentType *string `json:"agent_type,omitempty"`
 }
 
 // PreToolUseHookSpecificOutput contains PreToolUse-specific output fields.
