@@ -48,6 +48,14 @@ type Client interface {
 	// task ID from its TaskStartedMessage.
 	// Only works in streaming mode (after Connect()).
 	StopTask(ctx context.Context, taskID string) error
+	// ReconnectMcpServer reconnects a disconnected or failed MCP server by
+	// the name from its configuration.
+	// Only works in streaming mode (after Connect()).
+	ReconnectMcpServer(ctx context.Context, serverName string) error
+	// ToggleMcpServer enables or disables an MCP server by the name from its
+	// configuration. A disabled server shows status "disabled" in GetMcpStatus.
+	// Only works in streaming mode (after Connect()).
+	ToggleMcpServer(ctx context.Context, serverName string, enabled bool) error
 	GetStreamIssues() []StreamIssue
 	GetStreamStats() StreamStats
 	GetServerInfo(ctx context.Context) (map[string]interface{}, error)
@@ -756,6 +764,38 @@ func (c *ClientImpl) StopTask(ctx context.Context, taskID string) error {
 	}
 
 	return transport.StopTask(ctx, taskID)
+}
+
+// ReconnectMcpServer reconnects a disconnected or failed MCP server.
+// Returns error if not connected or if the CLI rejects the request, for
+// example for an unknown server name.
+func (c *ClientImpl) ReconnectMcpServer(ctx context.Context, serverName string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	transport, err := c.liveTransport()
+	if err != nil {
+		return err
+	}
+
+	return transport.ReconnectMcpServer(ctx, serverName)
+}
+
+// ToggleMcpServer enables or disables an MCP server.
+// Returns error if not connected or if the CLI rejects the request, for
+// example for an unknown server name.
+func (c *ClientImpl) ToggleMcpServer(ctx context.Context, serverName string, enabled bool) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	transport, err := c.liveTransport()
+	if err != nil {
+		return err
+	}
+
+	return transport.ToggleMcpServer(ctx, serverName, enabled)
 }
 
 // clientIterator implements MessageIterator for client message reception

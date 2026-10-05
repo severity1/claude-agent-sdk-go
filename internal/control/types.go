@@ -36,6 +36,10 @@ const (
 	SubtypeRewindFiles = "rewind_files"
 	// SubtypeStopTask stops a single running task.
 	SubtypeStopTask = "stop_task"
+	// SubtypeMcpReconnect reconnects one MCP server.
+	SubtypeMcpReconnect = "mcp_reconnect"
+	// SubtypeMcpToggle enables or disables one MCP server.
+	SubtypeMcpToggle = "mcp_toggle"
 )
 
 // Response subtype constants for control responses.
@@ -149,6 +153,22 @@ type StopTaskRequest struct {
 	Subtype string `json:"subtype"`
 	// TaskID is the task_id from the task's task_started system message.
 	TaskID string `json:"task_id"`
+}
+
+// McpReconnectRequest asks the CLI to reconnect one MCP server.
+type McpReconnectRequest struct {
+	// Subtype is always SubtypeMcpReconnect ("mcp_reconnect").
+	Subtype    string `json:"subtype"`
+	ServerName string `json:"serverName"`
+}
+
+// McpToggleRequest enables or disables one MCP server.
+type McpToggleRequest struct {
+	// Subtype is always SubtypeMcpToggle ("mcp_toggle").
+	Subtype    string `json:"subtype"`
+	ServerName string `json:"serverName"`
+	// Enabled has no omitempty: false must reach the CLI.
+	Enabled bool `json:"enabled"`
 }
 
 // PermissionUpdateType specifies the type of permission update.
