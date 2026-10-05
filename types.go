@@ -159,7 +159,15 @@ const (
 
 // Rate-limit window status constants.
 const (
-	RateLimitStatusAllowed = shared.RateLimitStatusAllowed
+	RateLimitStatusAllowed        = shared.RateLimitStatusAllowed
+	RateLimitStatusAllowedWarning = shared.RateLimitStatusAllowedWarning
+	RateLimitStatusRejected       = shared.RateLimitStatusRejected
+
+	RateLimitTypeFiveHour       = shared.RateLimitTypeFiveHour
+	RateLimitTypeSevenDay       = shared.RateLimitTypeSevenDay
+	RateLimitTypeSevenDayOpus   = shared.RateLimitTypeSevenDayOpus
+	RateLimitTypeSevenDaySonnet = shared.RateLimitTypeSevenDaySonnet
+	RateLimitTypeOverage        = shared.RateLimitTypeOverage
 )
 
 // Re-export content block type constants

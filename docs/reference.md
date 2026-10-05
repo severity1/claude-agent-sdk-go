@@ -1513,13 +1513,15 @@ type RateLimitEventMessage struct {
 }
 
 type RateLimitInfo struct {
-    Status          string // for example RateLimitStatusAllowed ("allowed")
-    ResetsAt        int64
-    RateLimitType   string
-    OverageStatus   string
-    OverageResetsAt int64
-    IsUsingOverage  bool
-    Raw             map[string]any // the whole rate_limit_info object
+    Status                string   // RateLimitStatusAllowed, RateLimitStatusAllowedWarning or RateLimitStatusRejected
+    ResetsAt              int64
+    RateLimitType         string   // RateLimitTypeFiveHour, RateLimitTypeSevenDay, RateLimitTypeSevenDayOpus, ...
+    Utilization           *float64 // used fraction of the window (0.0 to 1.0), nil when absent
+    OverageStatus         string
+    OverageResetsAt       int64
+    OverageDisabledReason string
+    IsUsingOverage        bool           // Go extra; Python keeps it only in raw
+    Raw                   map[string]any // the whole rate_limit_info object
 }
 ```
 

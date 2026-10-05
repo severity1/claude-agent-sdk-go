@@ -560,6 +560,12 @@ func (p *Parser) parseRateLimitEventMessage(data map[string]any) (*shared.RateLi
 	if b, ok := infoRaw["isUsingOverage"].(bool); ok {
 		info.IsUsingOverage = b
 	}
+	if f, ok := infoRaw["utilization"].(float64); ok {
+		info.Utilization = &f
+	}
+	if s, ok := infoRaw["overageDisabledReason"].(string); ok {
+		info.OverageDisabledReason = s
+	}
 	info.Raw = infoRaw
 
 	msg := &shared.RateLimitEventMessage{
