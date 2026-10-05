@@ -2592,6 +2592,38 @@ func TestAgentDefinitionOptions(t *testing.T) {
 		assertAgentDefinition(t, agent, "Reviews code for best practices", "You are a code reviewer...", []string{"Read", "Grep"}, AgentModelSonnet)
 	})
 
+	t.Run("all_fields_through_root_types", func(t *testing.T) {
+		background := true
+		options := NewOptions(WithAgent("researcher", AgentDefinition{
+			Description:     "Researches",
+			Prompt:          "You research.",
+			DisallowedTools: []string{"Bash"},
+			Skills:          []string{"pdf"},
+			Memory:          AgentMemoryProject,
+			McpServers:      []AgentMcpServer{{Name: "slack"}, {Name: "local", Config: &McpStdioServerConfig{Command: "python"}}},
+			InitialPrompt:   "/start",
+			MaxTurns:        4,
+			Background:      &background,
+			Effort:          AgentEffortTokens(32000),
+			PermissionMode:  PermissionModePlan,
+		}))
+
+		agent := options.Agents["researcher"]
+		if agent.MaxTurns != 4 || agent.Memory != AgentMemoryProject || len(agent.McpServers) != 2 {
+			t.Errorf("agent fields not kept: %+v", agent)
+		}
+		if _, ok := agent.Effort.(AgentEffortTokens); !ok {
+			t.Errorf("Effort type = %T, want AgentEffortTokens", agent.Effort)
+		}
+		var level AgentEffort = AgentEffortLevel(EffortHigh)
+		if _, ok := level.(AgentEffortLevel); !ok {
+			t.Errorf("AgentEffortLevel does not implement AgentEffort")
+		}
+		if err := prepareOptions(options); err != nil {
+			t.Errorf("prepareOptions() = %v, want nil", err)
+		}
+	})
+
 	t.Run("multiple_agents", func(t *testing.T) {
 		agents := map[string]AgentDefinition{
 			"code-reviewer": {

@@ -3939,3 +3939,37 @@ func TestPrepareOptionsResumeMetacharacters(t *testing.T) {
 		t.Fatalf("prepareOptions(Resume=%q) on %s: error = %v, wantErr %v", resume, runtime.GOOS, err, wantErr)
 	}
 }
+
+// TestInvalidAgentFailsBeforeConnect makes sure Query, QueryWithTransport
+// and Client.Connect reject an invalid agent before they use the transport.
+func TestInvalidAgentFailsBeforeConnect(t *testing.T) {
+	ctx, cancel := setupClientTestContext(t, 5*time.Second)
+	defer cancel()
+	badAgent := WithAgent("reviewer", AgentDefinition{Description: "d", Prompt: "p", MaxTurns: -1})
+	const wantErr = `agent "reviewer": maxTurns must be non-negative`
+
+	_, err := Query(ctx, "hi", badAgent)
+	assertErrorContains(t, "Query", err, wantErr)
+
+	queryTransport := newQueryMockTransport()
+	_, err = QueryWithTransport(ctx, "hi", queryTransport, badAgent)
+	assertErrorContains(t, "QueryWithTransport", err, wantErr)
+	if queryTransport.connected {
+		t.Error("QueryWithTransport connected the transport for an invalid agent")
+	}
+
+	clientTransport := newClientMockTransport()
+	client := NewClientWithTransport(clientTransport, badAgent)
+	err = client.Connect(ctx)
+	assertErrorContains(t, "Client.Connect", err, wantErr)
+	if clientTransport.connected {
+		t.Error("Client.Connect connected the transport for an invalid agent")
+	}
+}
+
+func assertErrorContains(t *testing.T, call string, err error, want string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("%s error = %v, want it to contain %q", call, err, want)
+	}
+}

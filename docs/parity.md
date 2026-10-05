@@ -482,7 +482,7 @@ Go SDK provides idiomatic helper functions following the `os.IsNotExist` pattern
 
 | Python | Go | Status |
 |:-------|:---|:-------|
-| `AgentDefinition` dataclass | `AgentDefinition` struct | PARTIAL (Go has `Description`, `Prompt`, `Tools`, `Model`; newer Python fields pending, README #19, #36, #44) |
+| `AgentDefinition` dataclass | `AgentDefinition` struct | PARITY (all Python fields; nil slice not sent, empty slice sends `[]`. Divergences: zero value as unset for `MaxTurns`, `InitialPrompt`, `Memory`, `PermissionMode`; `Effort` is the sealed `AgentEffort` interface; `McpServers` entries are `AgentMcpServer{Name, Config}`; `ValidateAgents` rejects invalid values that Python sends as is. README #19, #36, #44) |
 | `model` alias `"sonnet"` | `AgentModelSonnet` | PARITY |
 | `model` alias `"opus"` | `AgentModelOpus` | PARITY |
 | `model` alias `"haiku"` | `AgentModelHaiku` | PARITY |

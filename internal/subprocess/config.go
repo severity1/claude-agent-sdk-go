@@ -242,13 +242,9 @@ func (t *Transport) sdkMcpServersProtocolOption() control.ProtocolOption {
 // agentsToMap converts the typed Options.Agents map into the
 // map[string]any shape consumed by the control protocol.
 //
-// Stripping rule: description and prompt always emit (Go strings, no
-// nil/None distinction); empty Tools slice and empty Model string are
-// dropped. This is stricter than Python's `if v is not None` rule
-// (Python preserves empty list and empty string), but acceptable
-// because Go's AgentDefinition uses zero-value-as-unset semantics. The
-// per-field strip decision should be re-examined when AgentDefinition
-// gains nullable optional fields.
+// Omit rule: description and prompt always emit; a slice emits when it is
+// non-nil (an empty slice sends []); a string emits when it is non-empty;
+// MaxTurns emits when > 0; Background and Effort emit when non-nil.
 func agentsToMap(agents map[string]shared.AgentDefinition) map[string]any {
 	out := make(map[string]any, len(agents))
 	for name, agent := range agents {
@@ -256,15 +252,68 @@ func agentsToMap(agents map[string]shared.AgentDefinition) map[string]any {
 			"description": agent.Description,
 			"prompt":      agent.Prompt,
 		}
-		if len(agent.Tools) > 0 {
-			entry["tools"] = agent.Tools
+		putSlice(entry, "tools", agent.Tools)
+		putSlice(entry, "disallowedTools", agent.DisallowedTools)
+		putSlice(entry, "skills", agent.Skills)
+		putString(entry, "model", string(agent.Model))
+		putString(entry, "memory", string(agent.Memory))
+		putString(entry, "initialPrompt", agent.InitialPrompt)
+		putString(entry, "permissionMode", string(agent.PermissionMode))
+		if agent.MaxTurns > 0 {
+			entry["maxTurns"] = agent.MaxTurns
 		}
-		if agent.Model != "" {
-			entry["model"] = string(agent.Model)
+		if agent.Background != nil {
+			entry["background"] = *agent.Background
+		}
+		if effort := shared.AgentEffortValue(agent.Effort); effort != nil {
+			entry["effort"] = effort
+		}
+		if agent.McpServers != nil {
+			entry["mcpServers"] = agentMcpServersValue(agent.McpServers)
 		}
 		out[name] = entry
 	}
 	return out
+}
+
+func putSlice(entry map[string]any, key string, values []string) {
+	if values != nil {
+		entry[key] = values
+	}
+}
+
+func putString(entry map[string]any, key, value string) {
+	if value != "" {
+		entry[key] = value
+	}
+}
+
+// agentMcpServersValue gives a name string for a server referenced by name
+// and a {name: config} object for an inline server.
+func agentMcpServersValue(servers []shared.AgentMcpServer) []any {
+	out := make([]any, 0, len(servers))
+	for _, server := range servers {
+		if server.Config == nil {
+			out = append(out, server.Name)
+			continue
+		}
+		out = append(out, map[string]any{server.Name: mcpServerConfigMap(server.Config)})
+	}
+	return out
+}
+
+// mcpServerConfigMap round-trips config through JSON and sets "type" from
+// GetType, because the config structs send an empty type when Type is unset.
+func mcpServerConfigMap(config shared.McpServerConfig) map[string]any {
+	// shared.ValidateAgents rejects a config that is not a JSON object.
+	var m map[string]any
+	raw, _ := json.Marshal(config)
+	_ = json.Unmarshal(raw, &m)
+	if m == nil {
+		m = map[string]any{}
+	}
+	m["type"] = string(config.GetType())
+	return m
 }
 
 // buildEnvironment constructs the environment variables for the subprocess.

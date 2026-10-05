@@ -2608,11 +2608,68 @@ claudecode.Query(ctx, "Build and test my project",
 
 ```go
 type AgentDefinition struct {
-    Description string
-    Prompt      string
-    Tools       []string
-    Model       AgentModel
+    Description     string
+    Prompt          string
+    Tools           []string         // nil: default tools; empty: no tools
+    DisallowedTools []string
+    Model           AgentModel       // alias or full model ID
+    Skills          []string
+    Memory          AgentMemory      // "": unset
+    McpServers      []AgentMcpServer
+    InitialPrompt   string           // "": unset
+    MaxTurns        int              // 0: unset
+    Background      *bool            // nil: unset
+    Effort          AgentEffort      // nil or an empty AgentEffortLevel: unset
+    PermissionMode  PermissionMode   // "": unset
 }
+```
+
+The agents travel on the `initialize` control request. A nil slice is not sent, and a non-nil empty slice is sent as `[]`. `Query`, `QueryWithTransport` and `Client.Connect` return an error for an `McpServers` entry with an empty `Name`, an inline `*McpSdkServerConfig`, a negative `MaxTurns`, or a negative `AgentEffortTokens`.
+
+### `AgentMemory`
+
+```go
+type AgentMemory string
+
+const (
+    AgentMemoryUser    AgentMemory = "user"
+    AgentMemoryProject AgentMemory = "project"
+    AgentMemoryLocal   AgentMemory = "local"
+)
+```
+
+### `AgentMcpServer`
+
+```go
+type AgentMcpServer struct {
+    Name   string
+    Config McpServerConfig // nil: refer to a server by name
+}
+```
+
+A nil `Config` sends the name. A non-nil `Config` defines the server inline and sends `{"<Name>": {...config, "type": "<GetType()>"}}`. To give an agent an SDK MCP server, add it to `McpServers` in the options and refer to it by name.
+
+### `AgentEffort`
+
+```go
+type AgentEffort interface{ /* sealed */ }
+
+type AgentEffortLevel EffortLevel // sends the level, for example "high"
+type AgentEffortTokens int        // sends the token count
+```
+
+```go
+claudecode.WithAgent("researcher", claudecode.AgentDefinition{
+    Description:     "Researches a topic",
+    Prompt:          "You are a researcher.",
+    DisallowedTools: []string{"Bash"},
+    McpServers: []claudecode.AgentMcpServer{
+        {Name: "slack"},
+        {Name: "local", Config: &claudecode.McpStdioServerConfig{Command: "python", Args: []string{"server.py"}}},
+    },
+    MaxTurns: 10,
+    Effort:   claudecode.AgentEffortLevel(claudecode.EffortHigh),
+})
 ```
 
 ### `AgentModel`

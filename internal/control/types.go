@@ -107,8 +107,7 @@ type InitializeRequest struct {
 	Hooks map[string][]HookMatcherConfig `json:"hooks"`
 	// Agents contains agent definitions keyed by name, sent via stdin
 	// to bypass platform ARG_MAX limits. The value for each agent is a
-	// map of agent fields with nil/empty Tools and empty Model stripped
-	// at the subprocess boundary (see agentsToMap).
+	// map of the agent fields that are set (see agentsToMap).
 	Agents map[string]any `json:"agents,omitempty"`
 	// Skills filters the discovered Skills. A pointer keeps an empty list
 	// (disable all) distinct from absent (no filter), as in Python.
