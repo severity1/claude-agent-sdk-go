@@ -399,8 +399,9 @@ func runStreamMock(mode string) {
 	}
 }
 
-// mockFixedLineLen is the byte length of the line fixed_size_line writes.
-const mockFixedLineLen = 4096
+// mockFixedLineLen is the byte length of the line fixed_size_line writes. It
+// is above the 64 KiB start size of the stdout buffer, so the buffer must grow.
+const mockFixedLineLen = 100 * 1024
 
 // fixedSizeAssistantLine returns an assistant message line of exactly n bytes.
 func fixedSizeAssistantLine(n int) string {

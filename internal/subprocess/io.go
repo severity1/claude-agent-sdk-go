@@ -91,8 +91,15 @@ func (t *Transport) handleStdout(protocol *control.Protocol, child childProcess)
 		maxLineSize = *t.options.MaxBufferSize
 	}
 	// The scanner buffer also holds the newline, so +1 lets a line of exactly
-	// the limit through (Python rejects only a longer line).
-	scanner.Buffer(make([]byte, maxLineSize+1), maxLineSize+1)
+	// the limit through (Python rejects only a longer line). The buffer starts
+	// small and grows to the limit only when a line needs it, so a high limit
+	// does not cost its full size for every open transport. The start size
+	// must not pass the limit, because the scanner uses the larger of the two.
+	startSize := 64 * 1024
+	if startSize > maxLineSize+1 {
+		startSize = maxLineSize + 1
+	}
+	scanner.Buffer(make([]byte, 0, startSize), maxLineSize+1)
 
 	var lastErrorResult string
 	for scanner.Scan() {
