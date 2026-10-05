@@ -957,6 +957,27 @@ func TestParseRateLimitEventMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("raw keeps fields that the type does not name", func(t *testing.T) {
+		msg, err := parser.ParseMessage(map[string]any{
+			"type": "rate_limit_event",
+			"rate_limit_info": map[string]any{
+				"status":        "allowed_warning",
+				"rateLimitType": "seven_day",
+				"utilization":   0.82,
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		rl, ok := msg.(*shared.RateLimitEventMessage)
+		if !ok {
+			t.Fatalf("expected *RateLimitEventMessage, got %T", msg)
+		}
+		if rl.RateLimitInfo.Raw["utilization"] != 0.82 {
+			t.Errorf("Raw = %v, want utilization 0.82", rl.RateLimitInfo.Raw)
+		}
+	})
+
 	t.Run("missing rate_limit_info is parse error", func(t *testing.T) {
 		_, err := parser.ParseMessage(map[string]any{
 			"type": "rate_limit_event",
