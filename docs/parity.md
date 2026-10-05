@@ -231,8 +231,8 @@ These contributor PRs merged on Oct 4, 2026, after v0.8.0. The table maps each o
 | `ThinkingBlock` | `ThinkingBlock` struct | PARITY |
 | `ToolUseBlock` | `ToolUseBlock` struct | PARITY |
 | `ToolResultBlock` | `ToolResultBlock` struct | PARITY |
-| `ServerToolUseBlock` | `ServerToolUseBlock` struct | PARITY (`Name` is `ServerToolName`) |
-| `ServerToolResultBlock` | `ServerToolResultBlock` struct | PARITY |
+| `ServerToolUseBlock` | `ServerToolUseBlock` struct | PARITY (`Name` is `ServerToolName`; Go also parses it in user messages, where Python drops it, and requires `input` to be an object) |
+| `ServerToolResultBlock` | `ServerToolResultBlock` struct | PARITY (Go also parses it in user messages, where Python drops it, and requires `content` to be an object) |
 
 ### Content Block Type Constants
 

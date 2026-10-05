@@ -512,10 +512,6 @@ func (p *Parser) parseToolResultBlock(data map[string]any) (shared.ContentBlock,
 	}, nil
 }
 
-// parseRateLimitEventMessage parses a rate_limit_event message from raw JSON
-// data. Tolerant on optional fields: only the rate_limit_info object is
-// required; uuid / session_id are best-effort copies because the CLI does
-// not always include them depending on session state.
 func parseConversationResetMessage(data map[string]any) (*shared.ConversationResetMessage, error) {
 	fields := [3]string{"new_conversation_id", "uuid", "session_id"}
 	var values [3]string
@@ -535,6 +531,10 @@ func parseConversationResetMessage(data map[string]any) (*shared.ConversationRes
 	}, nil
 }
 
+// parseRateLimitEventMessage parses a rate_limit_event message from raw JSON
+// data. Tolerant on optional fields: only the rate_limit_info object is
+// required; uuid / session_id are best-effort copies because the CLI does
+// not always include them depending on session state.
 func (p *Parser) parseRateLimitEventMessage(data map[string]any) (*shared.RateLimitEventMessage, error) {
 	infoRaw, ok := data["rate_limit_info"].(map[string]any)
 	if !ok {

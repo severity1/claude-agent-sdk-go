@@ -12,7 +12,7 @@ Tracks all Python SDK PRs that need to be replayed into the Go SDK to restore pa
 | Last ported feature | Go PR #99 (Jan 24, 2026) - tool_use_result (Python PR #495) |
 | Python SDK at checkpoint | v0.1.22 |
 | Python SDK at snapshot | v0.1.58 |
-| Go status verified | rows #10 and #11 against Go main de83b7d (Oct 4, 2026); rows #12, #16, #17, #20 and #31 against Go v0.8.0 (6c9d76f, Oct 4, 2026); rows #6, #14, #18, #29 and #43 against Go main 58cf570 (v0.7.1, Oct 1, 2026); rows #14a and #30 against Go PR #163 |
+| Go status verified | rows #7, #8, #42 and #47 against Go v0.9.0 (cf58dbc, Oct 5, 2026); rows #10 and #11 against Go main de83b7d (Oct 4, 2026); rows #12, #16, #17, #20 and #31 against Go v0.8.0 (6c9d76f, Oct 4, 2026); rows #6, #14, #18, #29 and #43 against Go main 58cf570 (v0.7.1, Oct 1, 2026); rows #14a and #30 against Go PR #163 |
 
 PRs merged after April 12, 2026 do not belong in this file. They are tracked in [post-snapshot.md](post-snapshot.md), which keeps the snapshot above stable as the canonical Phase 1-4 record.
 
@@ -86,7 +86,7 @@ PRs merged after April 12, 2026 do not belong in this file. They are tracked in 
 | 39 | #764 | get_context_usage() | Mar 28 | feat | pending | - | Python added get_context_usage() returning ContextUsageResponse: categories ([]ContextUsageCategory with name/tokens/color/isDeferred), totalTokens, maxTokens, percentage, model, optional autoCompactThreshold/mcpTools/agents. Add GetContextUsage(ctx) to Client, ContextUsageResponse/ContextUsageCategory structs, control request subtype, wire through Transport. |
 | 40 | #751 | control_cancel_request handling | Mar 28 | feat | pending | - | Python handles control_cancel_request from CLI to cancel pending control requests (e.g., timed-out permission callbacks). Update `internal/control/protocol.go` to handle incoming "cancel_request" by canceling context of pending request by request_id. |
 | 41 | #769 | send string prompt in connect() | Mar 28 | fix | pending | - | Python fixed connect(prompt="...") silently dropping prompt. Verify Go Client.Connect() sends prompt via stdin after connection established. |
-| 42 | #778 | omit --setting-sources when empty | Mar 30 | fix | pending | - | Python omits --setting-sources when empty instead of passing empty value. Check `internal/cli/command.go` - verify empty SettingSources doesn't produce `--setting-sources ""`. |
+| 42 | #778 | omit --setting-sources when empty | Mar 30 | fix | n/a | #170 | Python #778 omitted `--setting-sources` for an empty list. Post-snapshot P5 (Python #822) reversed this: Python now emits `--setting-sources=` for an empty list and omits the flag only for None. Go follows P5 (`addSessionFlags` in `internal/cli/discovery.go`, Go PR #170), so this row is superseded. |
 | 43 | #780 | background task for string prompts with hooks/MCP | Mar 30 | fix | done | #134 | Python made the first-result wait a background task so it cannot deadlock a string prompt with hooks or SDK MCP servers. Go never blocks on that wait: `Next()` calls `maybeEndInputAfterResult` as it returns each message, and control requests run on their own goroutines (#151). |
 
 ---
@@ -98,7 +98,7 @@ PRs merged after April 12, 2026 do not belong in this file. They are tracked in 
 | 44 | #782 | background/effort/permissionMode on AgentDefinition | Mar 31 | feat | pending | - | Python added background (bool), effort (string), permissionMode (PermissionMode) to AgentDefinition. Add `Background *bool`, `Effort *string`, `PermissionMode *PermissionMode` with JSON tags. |
 | 45 | #756 | forward maxResultSizeChars via _meta | Apr 2 | fix | pending | - | Python forwards maxResultSizeChars in _meta of MCP tool results for large results (>50K chars). Add _meta.maxResultSizeChars to tool result JSON when exceeding threshold. |
 | 46 | #785 | 'auto' PermissionMode | Apr 7 | feat | pending | - | Python added "auto" PermissionMode (auto-approves safe tools, prompts for dangerous). Add `PermissionModeAuto PermissionMode = "auto"` in `internal/shared/options.go`. |
-| 47 | #796 | --thinking flag for adaptive/disabled | Apr 7 | fix | pending | - | Python fixed CLI flags: adaptive -> `--thinking adaptive`, disabled -> `--thinking disabled` (not budget tokens). Update CLI builder in `internal/cli/command.go` to handle ThinkingConfig types correctly. |
+| 47 | #796 | --thinking flag for adaptive/disabled | Apr 7 | fix | done | #181 | Python fixed the CLI flags: adaptive -> `--thinking adaptive`, disabled -> `--thinking disabled` (not budget tokens). Go emits these from `ThinkingConfigAdaptive` and `ThinkingConfigDisabled` (`thinkingArgs` in `internal/shared/options.go`, `addThinkingFlags` in `internal/cli/discovery.go`), together with row 7. |
 | 48 | #797 | exclude_dynamic_sections on SystemPromptPreset | Apr 8 | feat | pending | - | Python added exclude_dynamic_sections bool to SystemPromptPreset for cross-user prompt caching. Add ExcludeDynamicSections bool to SystemPromptPreset struct (create if needed), pass as CLI flag. |
 
 ---
