@@ -6,6 +6,11 @@ import (
 	"testing"
 )
 
+const (
+	testAgentID   = "agent-42"
+	testAgentType = "researcher"
+)
+
 func TestHookEventConstants(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -281,7 +286,7 @@ func TestSubagentStopHookInputSerialization(t *testing.T) {
 		StopHookActive:      false,
 		AgentID:             "agent_xyz",
 		AgentTranscriptPath: "/tmp/agent_transcript.json",
-		AgentType:           "researcher",
+		AgentType:           testAgentType,
 	}
 
 	data, err := json.Marshal(input)
@@ -300,7 +305,7 @@ func TestSubagentStopHookInputSerialization(t *testing.T) {
 	}
 	assertHookJSONField(t, result, "agent_id", "agent_xyz")
 	assertHookJSONField(t, result, "agent_transcript_path", "/tmp/agent_transcript.json")
-	assertHookJSONField(t, result, "agent_type", "researcher")
+	assertHookJSONField(t, result, "agent_type", testAgentType)
 }
 
 func TestPreCompactHookInputSerialization(t *testing.T) {
@@ -678,7 +683,7 @@ func TestSubagentStartHookInputSerialization(t *testing.T) {
 		},
 		HookEventName: "SubagentStart",
 		AgentID:       "agent_xyz",
-		AgentType:     "researcher",
+		AgentType:     testAgentType,
 	}
 
 	data, err := json.Marshal(input)
@@ -693,7 +698,7 @@ func TestSubagentStartHookInputSerialization(t *testing.T) {
 
 	assertHookJSONField(t, result, "hook_event_name", "SubagentStart")
 	assertHookJSONField(t, result, "agent_id", "agent_xyz")
-	assertHookJSONField(t, result, "agent_type", "researcher")
+	assertHookJSONField(t, result, "agent_type", testAgentType)
 }
 
 func TestPermissionRequestHookInputSerialization(t *testing.T) {
@@ -1006,5 +1011,120 @@ func assertHookJSONField(t *testing.T, result map[string]any, field string, expe
 	t.Helper()
 	if result[field] != expected {
 		t.Errorf("%s = %v, want %q", field, result[field], expected)
+	}
+}
+
+func TestToolHookInputsSubagentContextSerialization(t *testing.T) {
+	tests := []struct {
+		name       string
+		subagent   any
+		mainThread any
+	}{
+		{
+			name:       "PreToolUse",
+			subagent:   PreToolUseHookInput{HookEventName: "PreToolUse", AgentID: strPtrForTest(testAgentID), AgentType: strPtrForTest(testAgentType)},
+			mainThread: PreToolUseHookInput{HookEventName: "PreToolUse"},
+		},
+		{
+			name:       "PostToolUse",
+			subagent:   PostToolUseHookInput{HookEventName: "PostToolUse", AgentID: strPtrForTest(testAgentID), AgentType: strPtrForTest(testAgentType)},
+			mainThread: PostToolUseHookInput{HookEventName: "PostToolUse"},
+		},
+		{
+			name:       "PostToolUseFailure",
+			subagent:   PostToolUseFailureHookInput{HookEventName: "PostToolUseFailure", AgentID: strPtrForTest(testAgentID), AgentType: strPtrForTest(testAgentType)},
+			mainThread: PostToolUseFailureHookInput{HookEventName: "PostToolUseFailure"},
+		},
+		{
+			name:       "PermissionRequest",
+			subagent:   PermissionRequestHookInput{HookEventName: "PermissionRequest", AgentID: strPtrForTest(testAgentID), AgentType: strPtrForTest(testAgentType)},
+			mainThread: PermissionRequestHookInput{HookEventName: "PermissionRequest"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+"/subagent", func(t *testing.T) {
+			result := marshalHookInputToMap(t, tt.subagent)
+			assertHookJSONField(t, result, "agent_id", testAgentID)
+			assertHookJSONField(t, result, "agent_type", testAgentType)
+		})
+		t.Run(tt.name+"/main_thread", func(t *testing.T) {
+			result := marshalHookInputToMap(t, tt.mainThread)
+			for _, key := range []string{"agent_id", "agent_type"} {
+				if _, ok := result[key]; ok {
+					t.Errorf("%s should be absent on the main thread, got %v", key, result[key])
+				}
+			}
+		})
+	}
+}
+
+func TestParseHookInputSubagentContext(t *testing.T) {
+	events := []HookEvent{
+		HookEventPreToolUse,
+		HookEventPostToolUse,
+		HookEventPostToolUseFailure,
+		HookEventPermissionRequest,
+	}
+	p := &Protocol{}
+
+	for _, event := range events {
+		t.Run(string(event)+"/subagent", func(t *testing.T) {
+			parsed := p.parseHookInput(event, map[string]any{
+				"hook_event_name": string(event),
+				"tool_name":       "Bash",
+				"agent_id":        testAgentID,
+				"agent_type":      testAgentType,
+			})
+			agentID, agentType := subagentContextOf(t, parsed)
+			if agentID == nil || *agentID != testAgentID {
+				t.Errorf("AgentID = %v, want agent-42", agentID)
+			}
+			if agentType == nil || *agentType != testAgentType {
+				t.Errorf("AgentType = %v, want researcher", agentType)
+			}
+		})
+		t.Run(string(event)+"/main_thread", func(t *testing.T) {
+			parsed := p.parseHookInput(event, map[string]any{
+				"hook_event_name": string(event),
+				"tool_name":       "Bash",
+			})
+			agentID, agentType := subagentContextOf(t, parsed)
+			if agentID != nil || agentType != nil {
+				t.Errorf("AgentID = %v, AgentType = %v, want both nil", agentID, agentType)
+			}
+		})
+	}
+}
+
+func marshalHookInputToMap(t *testing.T, input any) map[string]any {
+	t.Helper()
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("Failed to marshal %T: %v", input, err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Failed to unmarshal to map: %v", err)
+	}
+	return result
+}
+
+func strPtrForTest(s string) *string { return &s }
+
+func subagentContextOf(t *testing.T, parsed any) (agentID, agentType *string) {
+	t.Helper()
+	switch in := parsed.(type) {
+	case *PreToolUseHookInput:
+		return in.AgentID, in.AgentType
+	case *PostToolUseHookInput:
+		return in.AgentID, in.AgentType
+	case *PostToolUseFailureHookInput:
+		return in.AgentID, in.AgentType
+	case *PermissionRequestHookInput:
+		return in.AgentID, in.AgentType
+	default:
+		t.Fatalf("unexpected hook input type %T", parsed)
+		return nil, nil
 	}
 }

@@ -208,6 +208,20 @@ func TestResultMessageMarshaling(t *testing.T) {
 	if typeField, ok := unmarshaled["type"]; !ok || typeField != "result" {
 		t.Errorf("Expected type field to be 'result', got: %v", typeField)
 	}
+
+	if _, ok := unmarshaled["stop_reason"]; ok {
+		t.Errorf("Expected stop_reason absent when nil, got: %s", jsonStr)
+	}
+
+	stopReason := "end_turn"
+	result.StopReason = &stopReason
+	data, err = result.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON failed: %v", err)
+	}
+	if !strings.Contains(string(data), `"stop_reason":"end_turn"`) {
+		t.Errorf("Expected stop_reason in JSON, got: %s", data)
+	}
 }
 
 // Helper functions

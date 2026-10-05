@@ -1480,6 +1480,7 @@ type ResultMessage struct {
     Errors           []string
     NumTurns         int
     SessionID        string
+    StopReason       *string // nil when the CLI sends none, for example "end_turn" when set
     TotalCostUSD     *float64
     Usage            *map[string]any
     Result           *string
@@ -1935,6 +1936,8 @@ type PreToolUseHookInput struct {
     ToolName      string
     ToolInput     map[string]any
     ToolUseID     string
+    AgentID       *string // set only inside a sub-agent
+    AgentType     *string // set inside a sub-agent, or on the main thread of a session started with --agent
 }
 ```
 
@@ -1950,6 +1953,8 @@ type PostToolUseHookInput struct {
     ToolInput     map[string]any
     ToolResponse  any
     ToolUseID     string
+    AgentID       *string // set only inside a sub-agent
+    AgentType     *string // set inside a sub-agent, or on the main thread of a session started with --agent
 }
 ```
 
@@ -1966,6 +1971,8 @@ type PostToolUseFailureHookInput struct {
     ToolUseID     string
     Error         string
     IsInterrupt   *bool // nil when the CLI omits the field
+    AgentID       *string // set only inside a sub-agent
+    AgentType     *string // set inside a sub-agent, or on the main thread of a session started with --agent
 }
 ```
 
@@ -2058,7 +2065,9 @@ type PermissionRequestHookInput struct {
     HookEventName         string
     ToolName              string
     ToolInput             map[string]any
-    PermissionSuggestions []any // nil when the CLI omits the field
+    PermissionSuggestions []any   // nil when the CLI omits the field
+    AgentID               *string // set only inside a sub-agent
+    AgentType             *string // set inside a sub-agent, or on the main thread of a session started with --agent
 }
 ```
 
