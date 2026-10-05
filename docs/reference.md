@@ -2619,7 +2619,7 @@ type AgentDefinition struct {
     InitialPrompt   string           // "": unset
     MaxTurns        int              // 0: unset
     Background      *bool            // nil: unset
-    Effort          AgentEffort      // nil: unset
+    Effort          AgentEffort      // nil or an empty AgentEffortLevel: unset
     PermissionMode  PermissionMode   // "": unset
 }
 ```

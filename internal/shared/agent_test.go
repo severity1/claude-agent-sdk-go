@@ -86,6 +86,7 @@ func TestAgentEffortValue(t *testing.T) {
 		{"level", AgentEffortLevel(EffortHigh), "high"},
 		{"xhigh_level", AgentEffortLevel(EffortXHigh), "xhigh"},
 		{"unknown_level_passes_through", AgentEffortLevel("extreme"), "extreme"},
+		{"empty_level_is_unset", AgentEffortLevel(""), nil},
 		{"tokens", AgentEffortTokens(32000), 32000},
 		{"zero_tokens", AgentEffortTokens(0), 0},
 	}

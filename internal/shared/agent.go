@@ -85,12 +85,18 @@ type AgentEffortLevel EffortLevel
 // AgentEffortTokens sets the effort of an agent as a token count.
 type AgentEffortTokens int
 
-func (e AgentEffortLevel) agentEffortValue() any { return string(e) }
+// An empty level is unset, like the other string fields of AgentDefinition.
+func (e AgentEffortLevel) agentEffortValue() any {
+	if e == "" {
+		return nil
+	}
+	return string(e)
+}
 
 func (e AgentEffortTokens) agentEffortValue() any { return int(e) }
 
 // AgentEffortValue returns the wire value of effort, or nil when effort is
-// nil or a typed nil pointer.
+// nil, a typed nil pointer or an empty level.
 func AgentEffortValue(effort AgentEffort) any {
 	if effort == nil {
 		return nil
