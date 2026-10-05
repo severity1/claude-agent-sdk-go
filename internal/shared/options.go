@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"reflect"
 	"strconv"
 )
 
@@ -205,21 +206,11 @@ func appendThinkingDisplay(args []string, display ThinkingDisplay) []string {
 // ThinkingArgs returns the CLI flags for cfg, or nil when cfg is nil or a
 // typed nil pointer.
 func ThinkingArgs(cfg ThinkingConfig) []string {
-	switch c := cfg.(type) {
-	case nil:
+	if cfg == nil {
 		return nil
-	case *ThinkingConfigAdaptive:
-		if c == nil {
-			return nil
-		}
-	case *ThinkingConfigEnabled:
-		if c == nil {
-			return nil
-		}
-	case *ThinkingConfigDisabled:
-		if c == nil {
-			return nil
-		}
+	}
+	if v := reflect.ValueOf(cfg); v.Kind() == reflect.Ptr && v.IsNil() {
+		return nil
 	}
 	return cfg.thinkingArgs()
 }

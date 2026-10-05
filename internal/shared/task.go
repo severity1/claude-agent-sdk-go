@@ -60,7 +60,7 @@ type TaskUsage struct {
 
 // TaskStartedMessage is the typed form of a task_started system message.
 // The embedded SystemMessage keeps the subtype and the raw payload, and
-// json.Marshal writes that raw payload. The parser always returns
+// json.Marshal of a pointer writes that raw payload. The parser always returns
 // *SystemMessage, so get this type with an AsTask* method, not a type switch.
 type TaskStartedMessage struct {
 	SystemMessage
@@ -74,7 +74,7 @@ type TaskStartedMessage struct {
 
 // TaskProgressMessage is the typed form of a task_progress system message.
 // The embedded SystemMessage keeps the subtype and the raw payload, and
-// json.Marshal writes that raw payload. The parser always returns
+// json.Marshal of a pointer writes that raw payload. The parser always returns
 // *SystemMessage, so get this type with an AsTask* method, not a type switch.
 type TaskProgressMessage struct {
 	SystemMessage
@@ -92,7 +92,7 @@ type TaskProgressMessage struct {
 // task sends one: a background task can report its end only as a
 // TaskUpdatedMessage with a terminal status (see IsTerminalTaskStatus).
 // The embedded SystemMessage keeps the subtype and the raw payload, and
-// json.Marshal writes that raw payload. The parser always returns
+// json.Marshal of a pointer writes that raw payload. The parser always returns
 // *SystemMessage, so get this type with an AsTask* method, not a type switch.
 type TaskNotificationMessage struct {
 	SystemMessage
@@ -111,7 +111,7 @@ type TaskNotificationMessage struct {
 // that is a string. A task stopped with StopTask can report its end only
 // here, with status killed and no TaskNotificationMessage.
 // The embedded SystemMessage keeps the subtype and the raw payload, and
-// json.Marshal writes that raw payload. The parser always returns
+// json.Marshal of a pointer writes that raw payload. The parser always returns
 // *SystemMessage, so get this type with an AsTask* method, not a type switch.
 type TaskUpdatedMessage struct {
 	SystemMessage

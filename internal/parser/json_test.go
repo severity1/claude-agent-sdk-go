@@ -936,24 +936,60 @@ func TestParseRateLimitEventMessage(t *testing.T) {
 		}
 	})
 
-	t.Run("non-allowed status", func(t *testing.T) {
+	t.Run("rejected status with all Python fields", func(t *testing.T) {
 		msg, err := parser.ParseMessage(map[string]any{
 			"type": "rate_limit_event",
 			"rate_limit_info": map[string]any{
-				"status":        "blocked",
-				"resetsAt":      float64(1778600000),
-				"rateLimitType": "five_hour",
+				"status":                "rejected",
+				"resetsAt":              float64(1778600000),
+				"rateLimitType":         "seven_day_opus",
+				"utilization":           0.97,
+				"overageStatus":         "rejected",
+				"overageResetsAt":       float64(1778700000),
+				"overageDisabledReason": "org_disabled",
 			},
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		rl := msg.(*shared.RateLimitEventMessage)
-		if rl.IsAllowed() {
-			t.Error("IsAllowed() = true for status=blocked")
+		rl, ok := msg.(*shared.RateLimitEventMessage)
+		if !ok {
+			t.Fatalf("expected *RateLimitEventMessage, got %T", msg)
+			return
 		}
-		if rl.RateLimitInfo.Status != "blocked" {
-			t.Errorf("Status = %q, want %q", rl.RateLimitInfo.Status, "blocked")
+		info := rl.RateLimitInfo
+		if rl.IsAllowed() {
+			t.Error("IsAllowed() = true for status=rejected")
+		}
+		if info.Status != shared.RateLimitStatusRejected || info.RateLimitType != shared.RateLimitTypeSevenDayOpus {
+			t.Errorf("Status/RateLimitType = %q/%q", info.Status, info.RateLimitType)
+		}
+		if info.Utilization == nil || *info.Utilization != 0.97 {
+			t.Errorf("Utilization = %v, want 0.97", info.Utilization)
+		}
+		if info.OverageStatus != shared.RateLimitStatusRejected || info.OverageResetsAt != 1778700000 {
+			t.Errorf("OverageStatus/OverageResetsAt = %q/%d", info.OverageStatus, info.OverageResetsAt)
+		}
+		if info.OverageDisabledReason != "org_disabled" {
+			t.Errorf("OverageDisabledReason = %q, want org_disabled", info.OverageDisabledReason)
+		}
+	})
+
+	t.Run("absent utilization stays nil", func(t *testing.T) {
+		msg, err := parser.ParseMessage(map[string]any{
+			"type":            "rate_limit_event",
+			"rate_limit_info": map[string]any{"status": shared.RateLimitStatusAllowedWarning},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		rl, ok := msg.(*shared.RateLimitEventMessage)
+		if !ok {
+			t.Fatalf("expected *RateLimitEventMessage, got %T", msg)
+			return
+		}
+		if rl.RateLimitInfo.Utilization != nil {
+			t.Errorf("Utilization = %v, want nil", *rl.RateLimitInfo.Utilization)
 		}
 	})
 

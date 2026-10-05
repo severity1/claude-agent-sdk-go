@@ -338,10 +338,22 @@ func (m *RawControlMessage) Type() string {
 	return m.MessageType
 }
 
-// Rate-limit window status constants. Status carries one of these strings;
-// "allowed" means the session is fine and the message is informational only.
+// Rate-limit window status constants. Status and OverageStatus carry one of
+// these strings; "allowed" means the message is informational only.
 const (
-	RateLimitStatusAllowed = "allowed"
+	RateLimitStatusAllowed        = "allowed"
+	RateLimitStatusAllowedWarning = "allowed_warning"
+	RateLimitStatusRejected       = "rejected"
+)
+
+// Rate-limit window constants for RateLimitInfo.RateLimitType. The CLI can
+// send other values; they pass through.
+const (
+	RateLimitTypeFiveHour       = "five_hour"
+	RateLimitTypeSevenDay       = "seven_day"
+	RateLimitTypeSevenDayOpus   = "seven_day_opus"
+	RateLimitTypeSevenDaySonnet = "seven_day_sonnet"
+	RateLimitTypeOverage        = "overage"
 )
 
 // RateLimitInfo carries the rate-limit window state from a rate_limit_event
@@ -349,21 +361,24 @@ const (
 // regardless of whether the user is actually constrained — check Status to
 // decide if action is needed.
 type RateLimitInfo struct {
-	Status          string         `json:"status"`
-	ResetsAt        int64          `json:"resetsAt"`
-	RateLimitType   string         `json:"rateLimitType"`
-	OverageStatus   string         `json:"overageStatus,omitempty"`
-	OverageResetsAt int64          `json:"overageResetsAt,omitempty"`
-	IsUsingOverage  bool           `json:"isUsingOverage,omitempty"`
-	Raw             map[string]any `json:"-"`
+	Status        string `json:"status"`
+	ResetsAt      int64  `json:"resetsAt"`
+	RateLimitType string `json:"rateLimitType"`
+	// Utilization is the used fraction of the window (0.0 to 1.0), nil when absent.
+	Utilization           *float64 `json:"utilization,omitempty"`
+	OverageStatus         string   `json:"overageStatus,omitempty"`
+	OverageResetsAt       int64    `json:"overageResetsAt,omitempty"`
+	OverageDisabledReason string   `json:"overageDisabledReason,omitempty"`
+	// IsUsingOverage is a Go extra; the Python SDK keeps it only in Raw.
+	IsUsingOverage bool `json:"isUsingOverage,omitempty"`
+	// Raw is the whole rate_limit_info object, including fields not named here.
+	Raw map[string]any `json:"-"`
 }
 
 // RateLimitEventMessage is a session heartbeat from the CLI announcing the
 // current rate-limit window. Emitted on essentially every session even when
 // nothing is constrained — most consumers can simply ignore the message
 // unless RateLimitInfo.Status differs from RateLimitStatusAllowed.
-//
-// See https://github.com/severity1/claude-agent-sdk-go/issues/126.
 type RateLimitEventMessage struct {
 	MessageType   string        `json:"type"`
 	RateLimitInfo RateLimitInfo `json:"rate_limit_info"`

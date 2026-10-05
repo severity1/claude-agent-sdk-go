@@ -29,7 +29,7 @@ shared/
 - `Message` interface: `Type() string`
 - `ContentBlock` interface: `BlockType() string`
 - Concrete types: `UserMessage`, `AssistantMessage`, `SystemMessage`, `ResultMessage`
-- Content blocks: `TextBlock`, `ThinkingBlock`, `ToolUseBlock`, `ToolResultBlock`
+- Content blocks: `TextBlock`, `ThinkingBlock`, `ToolUseBlock`, `ToolResultBlock`, `ServerToolUseBlock`, `ServerToolResultBlock`
 
 **UserMessage fields**:
 - `Content`: string or `[]ContentBlock`

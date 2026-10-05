@@ -150,7 +150,11 @@ func NewClientWithTransport(transport Transport, opts ...Option) Client {
 //	    // Process responses
 //	    for msg := range client.ReceiveMessages(ctx) {
 //	        if assistantMsg, ok := msg.(*claudecode.AssistantMessage); ok {
-//	            fmt.Println("Claude:", assistantMsg.Content[0].(*claudecode.TextBlock).Text)
+//	            for _, block := range assistantMsg.Content {
+//	                if text, ok := block.(*claudecode.TextBlock); ok {
+//	                    fmt.Println("Claude:", text.Text)
+//	                }
+//	            }
 //	        }
 //	    }
 //	    return nil
@@ -392,17 +396,18 @@ func (c *ClientImpl) Disconnect() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Clear the watch before Close: during Close the transport's own state
+	// is torn down, so Err reports not-connected, never a transport error.
+	watch := c.swapWatch(nil)
 	if c.transport != nil && c.connected {
 		if err := c.transport.Close(); err != nil {
+			c.swapWatch(watch)
 			return fmt.Errorf("failed to close transport: %w", err)
 		}
 	}
 	if c.connected {
 		close(c.disconnected)
 	}
-	c.watchMu.Lock()
-	c.watch = nil
-	c.watchMu.Unlock()
 	c.connected = false
 	c.transport = nil
 	c.msgChan = nil
@@ -691,6 +696,15 @@ func (c *ClientImpl) currentWatch() *connectionWatch {
 	c.watchMu.Lock()
 	defer c.watchMu.Unlock()
 	return c.watch
+}
+
+// swapWatch sets the watch and returns the old one.
+func (c *ClientImpl) swapWatch(watch *connectionWatch) *connectionWatch {
+	c.watchMu.Lock()
+	defer c.watchMu.Unlock()
+	old := c.watch
+	c.watch = watch
+	return old
 }
 
 // liveTransport returns the transport of a connected client whose CLI

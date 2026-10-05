@@ -1249,6 +1249,67 @@ func TestClientDoneAndErrDoNotBlockDuringDisconnect(t *testing.T) {
 	}
 }
 
+// TestClientErrDuringDisconnect verifies that Err, called while Disconnect
+// waits for Close, never returns the transport's own not-connected error.
+// The mock follows the subprocess transport: the process exits first, then
+// cleanup clears the exit state, then Close returns.
+func TestClientErrDuringDisconnect(t *testing.T) {
+	ctx, cancel := setupClientTestContext(t, 10*time.Second)
+	defer cancel()
+
+	transport := &cleanupThenBlockTransport{
+		processMockTransport: newProcessMockTransport(),
+		cleaned:              make(chan struct{}),
+		release:              make(chan struct{}),
+	}
+	client := setupClientForTest(t, transport)
+	connectClientSafely(ctx, t, client)
+	done := client.Done()
+
+	disconnected := make(chan error, 1)
+	go func() { disconnected <- client.Disconnect() }()
+	<-transport.cleaned
+
+	assertChannelClosed(t, done, "Done() of the connection while Disconnect runs")
+	err := client.Err()
+	if !errors.Is(err, ErrNotConnected) || !IsConnectionError(err) {
+		t.Errorf("Err() during Disconnect = %v, want a *ConnectionError wrapping ErrNotConnected", err)
+	}
+
+	close(transport.release)
+	if err := <-disconnected; err != nil {
+		t.Fatalf("Disconnect() = %v", err)
+	}
+}
+
+// TestClientFailedDisconnectKeepsWatch verifies that Done and Err still
+// follow the connection when Close fails and the client stays connected.
+func TestClientFailedDisconnectKeepsWatch(t *testing.T) {
+	ctx, cancel := setupClientTestContext(t, 10*time.Second)
+	defer cancel()
+
+	transport := newProcessMockTransport()
+	client := setupClientForTest(t, transport)
+	connectClientSafely(ctx, t, client)
+
+	transport.mu.Lock()
+	transport.closeError = errors.New("close failed")
+	transport.mu.Unlock()
+	if err := client.Disconnect(); err == nil {
+		t.Fatal("Disconnect() = nil, want the close error")
+	}
+
+	assertChannelOpen(t, client.Done(), "Done() after a failed Disconnect")
+	if err := client.Err(); err != nil {
+		t.Errorf("Err() after a failed Disconnect = %v, want nil", err)
+	}
+
+	transport.mu.Lock()
+	transport.closeError = nil
+	transport.mu.Unlock()
+	disconnectClientSafely(t, client)
+}
+
 // TestClientNotConnectedErrors verifies that every call on a client that is
 // not connected returns a *ConnectionError that wraps ErrNotConnected.
 func TestClientNotConnectedErrors(t *testing.T) {
@@ -1851,6 +1912,37 @@ func (b *blockingCloseTransport) Close() error {
 	close(b.closing)
 	<-b.release
 	return b.processMockTransport.Close()
+}
+
+// cleanupThenBlockTransport is a processMockTransport whose Close ends the
+// process, then reports a plain not-connected Err like a cleaned-up
+// subprocess transport, then signals cleaned and waits for release.
+type cleanupThenBlockTransport struct {
+	*processMockTransport
+	cleaned chan struct{}
+	release chan struct{}
+
+	stateMu sync.Mutex
+	cleared bool
+}
+
+func (c *cleanupThenBlockTransport) Close() error {
+	c.exit(NewProcessError("Claude Code process exited unexpectedly (signal: terminated)", -1, ""))
+	c.stateMu.Lock()
+	c.cleared = true
+	c.stateMu.Unlock()
+	close(c.cleaned)
+	<-c.release
+	return c.clientMockTransport.Close()
+}
+
+func (c *cleanupThenBlockTransport) Err() error {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	if c.cleared {
+		return errors.New("transport not connected")
+	}
+	return c.processMockTransport.Err()
 }
 
 // serverInfoTransport is a clientMockTransport that keeps an initialize

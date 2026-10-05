@@ -31,9 +31,9 @@ Counts below compare Python SDK main (db750b2, Sep 30, 2026) with Go SDK main (d
 | Sandbox config | 3 types | 3 types | 4 `SandboxNetworkConfig` fields pending |
 
 
-### Contributor Go PRs (merged Oct 4, 2026)
+### Contributor Go PRs (merged Oct 4-5, 2026)
 
-These contributor PRs merged on Oct 4, 2026, after v0.8.0. The table maps each one to its Python reference and tracker row.
+These contributor PRs merged after v0.8.0: #164-#169 on Oct 4 (in v0.9.0), #187 and #188 on Oct 5 (in v0.9.1). The table maps each one to its Python reference and tracker row.
 
 | Go PR | Python reference | Tracker | Change |
 |:------|:-----------------|:--------|:-------|
@@ -43,6 +43,8 @@ These contributor PRs merged on Oct 4, 2026, after v0.8.0. The table maps each o
 | #167 | the reader sets its error on each pending request (`_internal/query.py:539-546`) | none (before the tracker window) | Fail pending control requests on CLI exit or `Close` |
 | #168 | `stop_task`, typed task messages, `TaskUpdatedMessage` | README #10 (part), #11; post-snapshot P27 | `StopTask`, `TaskStarted`/`TaskProgress`/`TaskNotification`/`TaskUpdated` messages (Go issue #143) |
 | #169 | `close()` (`_internal/transport/subprocess_cli.py`) | none (Go-only fix, related to README #14a, #30) | `Close` does not wait for a descendant that holds the CLI stdout |
+| #187 | `RateLimitInfo.raw` (`types.py`, `message_parser.py`) | README #15 (part) | Keep the whole `rate_limit_info` object on `RateLimitInfo.Raw` |
+| #188 | none (Python reads stdout with asyncio, no fixed line buffer) | none (Go-only fix) | Grow the stdout line buffer on demand instead of allocating the full `MaxBufferSize` |
 
 ---
 
@@ -195,7 +197,7 @@ These contributor PRs merged on Oct 4, 2026, after v0.8.0. The table maps each o
 | `SystemMessage` | `SystemMessage` struct | PARITY |
 | `ResultMessage` | `ResultMessage` struct | PARITY (some newer fields pending, for example `stop_reason`, `api_error_status`, `terminal_reason`, `model_usage`) |
 | `StreamEvent` | `StreamEvent` struct | PARITY |
-| `RateLimitEvent` | `RateLimitEventMessage` struct | PARTIAL (README #15) |
+| `RateLimitEvent` | `RateLimitEventMessage` struct | PARITY (README #15; Go does not reject a message without `uuid` or `session_id`, and keeps the extra `IsUsingOverage`) |
 | `ConversationResetMessage` | `ConversationResetMessage` struct | PARITY |
 | `TaskStartedMessage`, `TaskProgressMessage`, `TaskNotificationMessage` | `TaskStartedMessage`, `TaskProgressMessage`, `TaskNotificationMessage` structs via `SystemMessage.AsTaskStarted()` etc. | PARITY (delivered as `*SystemMessage`; see README #11) |
 | `TaskUpdatedMessage` | `TaskUpdatedMessage` struct via `SystemMessage.AsTaskUpdated()` | PARITY (delivered as `*SystemMessage`) |
@@ -231,8 +233,8 @@ These contributor PRs merged on Oct 4, 2026, after v0.8.0. The table maps each o
 | `ThinkingBlock` | `ThinkingBlock` struct | PARITY |
 | `ToolUseBlock` | `ToolUseBlock` struct | PARITY |
 | `ToolResultBlock` | `ToolResultBlock` struct | PARITY |
-| `ServerToolUseBlock` | `ServerToolUseBlock` struct | PARITY (`Name` is `ServerToolName`) |
-| `ServerToolResultBlock` | `ServerToolResultBlock` struct | PARITY |
+| `ServerToolUseBlock` | `ServerToolUseBlock` struct | PARITY (`Name` is `ServerToolName`; Go also parses it in user messages, where Python drops it, and requires `input` to be an object) |
+| `ServerToolResultBlock` | `ServerToolResultBlock` struct | PARITY (Go also parses it in user messages, where Python drops it, and requires `content` to be an object) |
 
 ### Content Block Type Constants
 
