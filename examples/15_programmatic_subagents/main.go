@@ -68,11 +68,16 @@ func runSingleAgentExample() {
 		Prompt:      "You are an expert code reviewer. Analyze code for bugs, security vulnerabilities, and adherence to best practices. Provide constructive feedback.",
 		Tools:       []string{"Read", "Grep", "Glob"},
 		Model:       claudecode.AgentModelSonnet,
+		// A reviewer reads code; it must not change files or run commands.
+		DisallowedTools: []string{"Write", "Edit", "Bash"},
+		MaxTurns:        5,
 	}
 
 	fmt.Printf("Agent: code-reviewer\n")
 	fmt.Printf("  Description: %s\n", codeReviewerAgent.Description)
 	fmt.Printf("  Tools: %v\n", codeReviewerAgent.Tools)
+	fmt.Printf("  Disallowed tools: %v\n", codeReviewerAgent.DisallowedTools)
+	fmt.Printf("  Max turns: %d\n", codeReviewerAgent.MaxTurns)
 	fmt.Printf("  Model: %s\n", codeReviewerAgent.Model)
 	fmt.Println()
 

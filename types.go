@@ -207,12 +207,34 @@ type AgentModel = shared.AgentModel
 // AgentDefinition defines a programmatic subagent.
 type AgentDefinition = shared.AgentDefinition
 
+// AgentMemory selects the memory scope of an agent.
+type AgentMemory = shared.AgentMemory
+
+// AgentMcpServer names an MCP server for an agent, by name or inline.
+type AgentMcpServer = shared.AgentMcpServer
+
+// AgentEffort is the effort of an agent: AgentEffortLevel or AgentEffortTokens.
+type AgentEffort = shared.AgentEffort
+
+// AgentEffortLevel sets the effort of an agent as a level.
+type AgentEffortLevel = shared.AgentEffortLevel
+
+// AgentEffortTokens sets the effort of an agent as a token count.
+type AgentEffortTokens = shared.AgentEffortTokens
+
 // Re-export agent model constants
 const (
 	AgentModelSonnet  = shared.AgentModelSonnet
 	AgentModelOpus    = shared.AgentModelOpus
 	AgentModelHaiku   = shared.AgentModelHaiku
 	AgentModelInherit = shared.AgentModelInherit
+)
+
+// Re-export agent memory constants
+const (
+	AgentMemoryUser    = shared.AgentMemoryUser
+	AgentMemoryProject = shared.AgentMemoryProject
+	AgentMemoryLocal   = shared.AgentMemoryLocal
 )
 
 // Transport abstracts the communication layer with Claude Code CLI.

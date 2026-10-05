@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/severity1/claude-agent-sdk-go/internal/shared"
 	"github.com/severity1/claude-agent-sdk-go/internal/subprocess"
 )
 
@@ -279,6 +280,10 @@ func prepareOptions(options *Options) error {
 	// Validate max turns
 	if options.MaxTurns < 0 {
 		return fmt.Errorf("max_turns must be non-negative, got: %d", options.MaxTurns)
+	}
+
+	if err := shared.ValidateAgents(options.Agents); err != nil {
+		return err
 	}
 
 	// Validate permission mode

@@ -18,6 +18,8 @@ shared/
 ├── errors.go              # CLINotFoundError, ConnectionError, etc.
 ├── errors_test.go         # Error type tests
 ├── errors_helpers_test.go # Error helper tests
+├── agent.go               # AgentDefinition, AgentEffort, AgentMcpServer, ValidateAgents
+├── agent_test.go          # Agent definition and validation tests
 ├── options.go             # Options struct, functional options
 ├── options_test.go        # Options tests
 ├── stream.go              # StreamIssue, StreamStats

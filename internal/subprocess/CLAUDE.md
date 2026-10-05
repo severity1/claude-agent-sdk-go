@@ -20,7 +20,7 @@ subprocess/
 ├── io_test.go            # I/O and stderr callback tests
 ├── process_test.go       # Process termination tests
 ├── config_test.go        # Environment and MCP config tests
-├── agents_test.go        # agentsToMap stripping and protocol options wiring tests
+├── agents_test.go        # agentsToMap field mapping and protocol options wiring tests
 ├── lifecycle_test.go     # Wait ownership, fast-exit output drain, init race, connect cancellation tests
 ├── mock_cli_test.go      # TestMain + os.Args[0] mock CLI (cross-platform, CLAUDE_SDK_TEST_MOCK_MODE); modes: default, long_running, should_fail, check_environment, invalid_output, with_control_protocol, with_stderr, init_error, burst_exit, exit_before_init, stdout_closed_alive, hang_init, early_error_result, two_permission_requests, exit_nonzero, error_result_exit, server_info, exit_clean, orphan_stdout, hold_stdout, ignore_sigterm, slow_exit_after_eof, stop_reading, fixed_size_line, close_orphan_stdout, orphan_stdout_and_stderr, orphan_holder
 ├── shutdown_test.go      # Graceful shutdown order and timing tests (event log via CLAUDE_SDK_TEST_MOCK_EVENT_LOG)
@@ -58,7 +58,7 @@ subprocess/
 - Skills on initialize: `skillsProtocolOption()` returns `control.WithSkills(skills)` only when `options.Skills` is `[]string`. Other values (nil, `SkillsAll`) send no filter.
 - Nil protocol guard: `GetMcpStatus()` (and other control delegation methods) return descriptive error `"internal error: transport connected but control protocol is nil"` when `t.protocol == nil` after connected check
 - `buildProtocolOptions()` is split into per-feature helpers (`canUseToolAdapter`, `hooksProtocolOption`, `sdkMcpServersProtocolOption`) to stay under gocyclo 15. The `agents` wiring uses `control.WithAgents(agentsToMap(...))`; `agentsToMap` converts `shared.AgentDefinition` to `map[string]any` at the package boundary so `control` stays free of any `shared` dependency.
-- `agentsToMap` stripping rule (deliberate divergence from Python): `description` and `prompt` always emit; empty `Tools` slice and empty `Model` string are dropped. Python's rule (`if v is not None`) is more permissive - it preserves `tools=[]` and `model=""`. Go is stricter because `AgentDefinition` uses zero-value-as-unset semantics and there is no way for a caller to distinguish "explicit empty" from "unset" with the current field types. Phase 2 #19 (Python PR #684) will introduce nullable optional fields (skills/memory/mcpServers); at that point the per-field strip decision should be re-examined - description/prompt should keep their unconditional treatment.
+- `agentsToMap` follows Python nil-vs-empty: nil slices omitted, non-nil empty slices send `[]`, strings emit when non-empty (`putSlice`/`putString`); `description`/`prompt` always emit; `McpServers` via `agentMcpServersValue`/`mcpServerConfigMap` (nil Config = name string, inline config gets `type` from `GetType()`); `Effort` via `shared.AgentEffortValue`; validation is `shared.ValidateAgents`, not here
 
 <!-- END AUTO-MANAGED -->
 

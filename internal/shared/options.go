@@ -215,21 +215,6 @@ func ThinkingArgs(cfg ThinkingConfig) []string {
 	return cfg.thinkingArgs()
 }
 
-// AgentDefinition defines a programmatic subagent.
-type AgentDefinition struct {
-	// Description is a brief description of the agent's purpose.
-	Description string `json:"description"`
-
-	// Prompt is the agent's system prompt.
-	Prompt string `json:"prompt"`
-
-	// Tools is an optional list of tools available to the agent.
-	Tools []string `json:"tools,omitempty"`
-
-	// Model specifies which model the agent should use.
-	Model AgentModel `json:"model,omitempty"`
-}
-
 // Options configures the Claude Agent SDK behavior.
 type Options struct {
 	// Tool Control
